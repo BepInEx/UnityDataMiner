@@ -27,22 +27,27 @@ namespace UnityDataMiner
                 .WriteTo.Console()
                 .CreateBootstrapLogger();
 
-            var res = await BuildCommandLine()
-                .UseHost(host =>
-                {
-                    host.UseConsoleLifetime(options => options.SuppressStatusMessages = true);
-                    host.ConfigureAppConfiguration(configuration => configuration.AddTomlFile("config.toml"));
-                    host.UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
-                        .ReadFrom.Configuration(context.Configuration)
-                        .Enrich.FromLogContext()
-                        .WriteTo.Console());
-                })
-                .UseDefaults()
-                .UseExceptionHandler((ex, _) => Log.Fatal(ex, "Exception, cannot continue!"), -1)
-                .Build()
-                .InvokeAsync(args);
-            Log.CloseAndFlush();
-            return res;
+            try
+            {
+                return await BuildCommandLine()
+                    .UseHost(host =>
+                    {
+                        host.UseConsoleLifetime(options => options.SuppressStatusMessages = true);
+                        host.ConfigureAppConfiguration(configuration => configuration.AddTomlFile("config.toml"));
+                        host.UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
+                            .ReadFrom.Configuration(context.Configuration)
+                            .Enrich.FromLogContext()
+                            .WriteTo.Console());
+                    })
+                    .UseDefaults()
+                    .UseExceptionHandler((ex, _) => Log.Fatal(ex, "Exception, cannot continue!"), -1)
+                    .Build()
+                    .InvokeAsync(args);
+            }
+            finally
+            {
+                Log.CloseAndFlush();
+            }
         }
 
         private static CommandLineBuilder BuildCommandLine()
@@ -64,7 +69,7 @@ namespace UnityDataMiner
             var unityVersions = await FetchUnityVersionsAsync(repository.FullName);
 
             Log.Information("Found {Count} unity versions", unityVersions.Count);
-            
+
             var toRun = string.IsNullOrEmpty(version)
                 ? unityVersions.Where(unityVersion => unityVersion.IsRunNeeded).ToArray()
                 : new[] { unityVersions.Single(x => x.RawVersion == version) };
@@ -140,23 +145,14 @@ namespace UnityDataMiner
 
         private static void UpdateGitRepository(string repositoryPath, List<UnityVersion> unityVersions)
         {
-            Repository repository;
-
-            try
-            {
-                repository = new Repository(repositoryPath);
-            }
-            catch (RepositoryNotFoundException)
-            {
-                Log.Logger.Warning("{Repository} is not a valid git repo", repositoryPath);
-                return;
-            }
+            var repository = new Repository(Repository.Init(repositoryPath));
 
             Commands.Stage(repository, Path.Combine(repositoryPath, "*"));
-            var curCommit = repository.Head.Tip;
-            var changes = curCommit != null ? repository.Diff.Compare<TreeChanges>(repository.Head.Tip.Tree, DiffTargets.WorkingDirectory) : null;
 
-            if (changes?.Any() ?? true)
+            var currentCommit = repository.Head.Tip;
+            var changes = repository.Diff.Compare<TreeChanges>(currentCommit?.Tree, DiffTargets.WorkingDirectory);
+
+            if (currentCommit == null || changes.Any())
             {
                 var addedVersions = new List<UnityVersion>();
 

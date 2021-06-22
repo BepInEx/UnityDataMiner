@@ -111,6 +111,7 @@ namespace UnityDataMiner
                 })!.WaitForExitAsync();
             }
 
+            Directory.GetParent(ZipFilePath)!.Create();
             ZipFile.CreateFromDirectory(Path.Combine(tmpDirectory, monoPath), ZipFilePath);
 
             Directory.Delete(tmpDirectory, true);
