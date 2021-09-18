@@ -13,14 +13,23 @@ using System.Text;
 using System.Threading.Tasks;
 using HtmlAgilityPack;
 using LibGit2Sharp;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using Tommy.Extensions.Configuration;
 
 namespace UnityDataMiner
 {
+    internal class MinerOptions
+    {
+        public string? NuGetSource { get; set; }
+        public string? NuGetSourceKey { get; set; }
+    }
+    
     internal static class Program
     {
+        private static readonly MinerOptions Options = new();
+        
         public static async Task<int> Main(string[] args)
         {
             Log.Logger = new LoggerConfiguration()
@@ -32,8 +41,9 @@ namespace UnityDataMiner
                 return await BuildCommandLine()
                     .UseHost(host =>
                     {
-                        host.UseConsoleLifetime(options => options.SuppressStatusMessages = true);
+                        host.UseConsoleLifetime(opts => opts.SuppressStatusMessages = true);
                         host.ConfigureAppConfiguration(configuration => configuration.AddTomlFile("config.toml"));
+                        host.ConfigureAppConfiguration(configuration => configuration.Build().GetSection("MinerOptions").Bind(Options));
                         host.UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
                             .ReadFrom.Configuration(context.Configuration)
                             .Enrich.FromLogContext()
@@ -66,6 +76,8 @@ namespace UnityDataMiner
 
         public static async Task RunAsync(string? version, DirectoryInfo repository)
         {
+            Directory.CreateDirectory(Path.Combine(repository.FullName, "libraries"));
+            Directory.CreateDirectory(Path.Combine(repository.FullName, "packages"));
             var unityVersions = await FetchUnityVersionsAsync(repository.FullName);
 
             Log.Information("Found {Count} unity versions", unityVersions.Count);
@@ -87,6 +99,21 @@ namespace UnityDataMiner
                     Log.Error(e, "Failed to download {Version}", unityVersion.RawVersion);
                 }
             })));
+            
+            if (!string.IsNullOrEmpty(Options.NuGetSource) && !string.IsNullOrEmpty(Options.NuGetSourceKey))
+                await Task.WhenAll(toRun.Select(unityVersion => Task.Run(async () =>
+                {
+                    try
+                    {
+                        await unityVersion.UploadNuGetPackage(Options.NuGetSource, Options.NuGetSourceKey);
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Error(e, "Failed to download {Version}", unityVersion.RawVersion);
+                    }
+                })));
+            else
+                Log.Information("Skipping pushing NuGet packages (no package config specified)");
 
             UpdateGitRepository(repository.FullName, unityVersions);
         }
@@ -106,7 +133,8 @@ namespace UnityDataMiner
                 if (href == null)
                     continue;
 
-                var uri = new Uri(href);
+                if (!Uri.TryCreate(href, UriKind.Absolute, out var uri))
+                    continue;
                 var split = uri.AbsolutePath.Split("/");
 
                 if (uri.Host != "download.unity3d.com" || split[1] != "download_unity")
