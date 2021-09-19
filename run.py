@@ -47,7 +47,7 @@ try:
     old_libs = set(os.listdir(unity_libs_path))
 
     network = config.get("docker_network", None)
-    result = subprocess.run(["docker", "run", "--rm", "-v", f"--network={network}" if network else "", f"{repo_path}:/data",
+    result = subprocess.run(["docker", "run", "--rm", f"--network={network}" if network else "", "-v", f"{repo_path}:/data",
                             "-v", f"{p.join(REPO_PATH, 'config.toml')}:/app/config.toml", "unity-miner"], check=True)
 
     new_libs = set(os.listdir(unity_libs_path))
