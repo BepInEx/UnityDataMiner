@@ -167,7 +167,7 @@ namespace UnityDataMiner
             {
                 Id = "UnityEngine.Modules",
                 Authors = new [] { "Unity" },
-                Version = new NuGetVersion(Version),
+                Version = NuGetVersion.Parse(ShortVersion),
                 Description = "UnityEngine modules",
                 DevelopmentDependency = true,
                 DependencyGroups = deps.Select(d => new PackageDependencyGroup(NuGetFramework.Parse(d), Array.Empty<PackageDependency>()))
