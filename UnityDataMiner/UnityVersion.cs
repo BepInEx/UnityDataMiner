@@ -91,6 +91,7 @@ namespace UnityDataMiner
                 (true, true) when Version.Major == 4 && Version.Minor >= 5 => "Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment/Data/Managed",
                 (true, true) => "Data/PlaybackEngines/windows64standaloneplayer/Managed",
                 (true, false) => "Unity/Unity.app/Contents/PlaybackEngines/WindowsStandaloneSupport/Variations/win64_nondevelopment_mono/Data/Managed",
+                _ when Version.Major >= 2021 && Version.Minor >= 2 => "Variations/win64_player_nondevelopment_mono/Data/Managed", 
                 _ => "Variations/win64_nondevelopment_mono/Data/Managed"
             };
             
