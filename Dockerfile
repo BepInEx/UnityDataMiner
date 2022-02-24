@@ -1,8 +1,8 @@
-FROM mcr.microsoft.com/dotnet/runtime:5.0-alpine as run
+FROM mcr.microsoft.com/dotnet/runtime:6.0-alpine as run
 WORKDIR /app
 RUN apk add p7zip cpio git
 
-FROM mcr.microsoft.com/dotnet/sdk:5.0-alpine as build
+FROM mcr.microsoft.com/dotnet/sdk:6.0-alpine as build
 WORKDIR /src
 COPY ./UnityDataMiner/UnityDataMiner.csproj /src
 RUN dotnet restore
