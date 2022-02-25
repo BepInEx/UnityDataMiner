@@ -11,10 +11,14 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml;
+using AssetRipper.VersionUtilities;
 using HtmlAgilityPack;
 using LibGit2Sharp;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
+using Microsoft.SyndicationFeed;
+using Microsoft.SyndicationFeed.Rss;
 using Serilog;
 using Tommy.Extensions.Configuration;
 
@@ -25,11 +29,11 @@ namespace UnityDataMiner
         public string? NuGetSource { get; set; }
         public string? NuGetSourceKey { get; set; }
     }
-    
+
     internal static class Program
     {
         private static readonly MinerOptions Options = new();
-        
+
         public static async Task<int> Main(string[] args)
         {
             Log.Logger = new LoggerConfiguration()
@@ -42,7 +46,7 @@ namespace UnityDataMiner
                     .UseHost(host =>
                     {
                         host.UseConsoleLifetime(opts => opts.SuppressStatusMessages = true);
-                        host.ConfigureAppConfiguration(configuration => configuration.AddTomlFile("config.toml"));
+                        host.ConfigureAppConfiguration(configuration => configuration.AddTomlFile("config.toml", true));
                         host.ConfigureAppConfiguration(configuration => configuration.Build().GetSection("MinerOptions").Bind(Options));
                         host.UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
                             .ReadFrom.Configuration(context.Configuration)
@@ -80,26 +84,24 @@ namespace UnityDataMiner
             Directory.CreateDirectory(Path.Combine(repository.FullName, "packages"));
             var unityVersions = await FetchUnityVersionsAsync(repository.FullName);
 
-            Log.Information("Found {Count} unity versions", unityVersions.Count);
-
             var toRun = string.IsNullOrEmpty(version)
                 ? unityVersions.Where(unityVersion => unityVersion.IsRunNeeded).ToArray()
-                : new[] { unityVersions.Single(x => x.RawVersion == version) };
+                : new[] { unityVersions.Single(x => x.ShortVersion == version) };
 
-            Log.Information("Downloading {Count} unity versions", toRun.Length);
+            Log.Information("Mining {Count} unity versions", toRun.Length);
 
-            await Task.WhenAll(toRun.Select(unityVersion => Task.Run(async () =>
+            await Parallel.ForEachAsync(toRun, async (unityVersion, _) =>
             {
                 try
                 {
-                    await unityVersion.MakeLibraryZipAsync();
+                    await unityVersion.MineAsync();
                 }
                 catch (Exception e)
                 {
-                    Log.Error(e, "Failed to download {Version}", unityVersion.RawVersion);
+                    Log.Error(e, "Failed to download {Version}", unityVersion.Version);
                 }
-            })));
-            
+            });
+
             if (!string.IsNullOrEmpty(Options.NuGetSource) && !string.IsNullOrEmpty(Options.NuGetSourceKey))
                 await Task.WhenAll(toRun.Select(unityVersion => Task.Run(async () =>
                 {
@@ -109,7 +111,7 @@ namespace UnityDataMiner
                     }
                     catch (Exception e)
                     {
-                        Log.Error(e, "Failed to download {Version}", unityVersion.RawVersion);
+                        Log.Error(e, "Failed to download {Version}", unityVersion.Version);
                     }
                 })));
             else
@@ -118,14 +120,22 @@ namespace UnityDataMiner
             UpdateGitRepository(repository.FullName, unityVersions);
         }
 
-        private static async Task<List<UnityVersion>> FetchUnityVersionsAsync(string repositoryPath)
+        private static async Task<List<UnityBuild>> FetchUnityVersionsAsync(string repositoryPath)
+        {
+            var unityVersions = new List<UnityBuild>();
+            unityVersions.AddRange(await FetchStableUnityVersionsAsync(repositoryPath));
+            unityVersions.AddRange(await FetchBetaUnityVersionsAsync(repositoryPath));
+            return unityVersions;
+        }
+
+        private static async Task<List<UnityBuild>> FetchStableUnityVersionsAsync(string repositoryPath)
         {
             var document = new HtmlDocument();
             using var httpClient = new HttpClient();
             await using var stream = await httpClient.GetStreamAsync("https://unity3d.com/get-unity/download/archive");
             document.Load(stream);
 
-            var unityVersions = new List<UnityVersion>();
+            var unityVersions = new List<UnityBuild>();
 
             foreach (var link in document.DocumentNode.Descendants("a"))
             {
@@ -155,7 +165,7 @@ namespace UnityDataMiner
                         throw new Exception("Invalid download link for " + href);
                     }
 
-                    unityVersions.Add(new UnityVersion(repositoryPath, split[2], split[4][prefix.Length..^exe.Length]));
+                    unityVersions.Add(new UnityBuild(repositoryPath, split[2], split[4][prefix.Length..^exe.Length]));
                 }
                 else if (innerText == "Unity Editor")
                 {
@@ -163,15 +173,43 @@ namespace UnityDataMiner
 
                     if (split.Length == 3 && split[2].StartsWith(prefix))
                     {
-                        unityVersions.Add(new UnityVersion(repositoryPath, null, split[2][prefix.Length..^exe.Length]));
+                        unityVersions.Add(new UnityBuild(repositoryPath, null, split[2][prefix.Length..^exe.Length]));
                     }
                 }
             }
 
+            Log.Information("Found {Count} stable unity versions", unityVersions.Count);
+
             return unityVersions;
         }
 
-        private static void UpdateGitRepository(string repositoryPath, List<UnityVersion> unityVersions)
+        private static async Task<List<UnityBuild>> FetchBetaUnityVersionsAsync(string repositoryPath)
+        {
+            using var httpClient = new HttpClient();
+            using var xmlReader = XmlReader.Create(await httpClient.GetStreamAsync("https://unity3d.com/unity/beta/latest.xml"));
+            var feedReader = new RssFeedReader(xmlReader);
+
+            var unityVersions = new List<UnityBuild>();
+
+            while (await feedReader.Read())
+            {
+                if (feedReader.ElementType == SyndicationElementType.Item)
+                {
+                    var item = await feedReader.ReadItem();
+
+                    if (item.Title.StartsWith("Release "))
+                    {
+                        unityVersions.Add(new UnityBuild(repositoryPath, item.Id, item.Title["Release ".Length..]));
+                    }
+                }
+            }
+
+            Log.Information("Found {Count} beta unity versions", unityVersions.Count);
+
+            return unityVersions;
+        }
+
+        private static void UpdateGitRepository(string repositoryPath, List<UnityBuild> unityVersions)
         {
             var repository = new Repository(Repository.Init(repositoryPath));
 
@@ -182,7 +220,7 @@ namespace UnityDataMiner
 
             if (currentCommit == null || changes.Any())
             {
-                var addedVersions = new List<UnityVersion>();
+                var addedVersions = new List<UnityBuild>();
 
                 if (changes != null)
                 {
@@ -192,7 +230,7 @@ namespace UnityDataMiner
 
                         if (path.Length == 2 && path[0] == "libraries" && path[1].EndsWith(".zip"))
                         {
-                            addedVersions.Add(unityVersions.Single(x => x.Version.ToString(3) == path[1][..^".zip".Length]));
+                            addedVersions.Add(unityVersions.Single(x => path[1][..^".zip".Length] == (x.Version.Type == UnityVersionType.Final ? x.ShortVersion : x.Version.ToString())));
                         }
                     }
                 }
@@ -202,7 +240,7 @@ namespace UnityDataMiner
                 if (addedVersions.Any())
                 {
                     message.AppendLine();
-                    message.AppendLine($"Added unity libraries for {string.Join(", ", addedVersions.OrderBy(x => x.Version).Select(x => x.RawVersion))}");
+                    message.AppendLine($"Added unity libraries for {string.Join(", ", addedVersions.OrderBy(x => x.Version).Select(x => x.Version))}");
                 }
 
                 var author = new Signature("UnityDataMiner", "UnityDataMiner@bepinex.dev", DateTimeOffset.Now);

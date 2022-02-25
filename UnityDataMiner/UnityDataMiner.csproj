@@ -4,11 +4,13 @@
         <OutputType>Exe</OutputType>
         <TargetFramework>net6.0</TargetFramework>
         <Nullable>enable</Nullable>
+        <SatelliteResourceLanguages>en-US</SatelliteResourceLanguages>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="dnlib" Version="3.4.0" />
         <PackageReference Include="LibGit2Sharp" Version="0.26.2" />
+        <PackageReference Include="Microsoft.SyndicationFeed.ReaderWriter" Version="1.0.2" />
         <PackageReference Include="NuGet.Packaging" Version="6.1.0" />
         <PackageReference Include="NuGet.Protocol" Version="6.1.0" />
         <PackageReference Include="System.CommandLine" Version="2.0.0-beta1.21216.1" />
@@ -22,6 +24,7 @@
         <PackageReference Include="Serilog.Sinks.Discord.Lite" Version="0.2.0" />
 
         <PackageReference Include="HtmlAgilityPack" Version="1.11.42" />
+        <PackageReference Include="AssetRipper.VersionUtilities" Version="1.1.0" />
     </ItemGroup>
 
 </Project>
