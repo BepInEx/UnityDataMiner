@@ -9,12 +9,12 @@
 
     <ItemGroup>
         <PackageReference Include="dnlib" Version="3.4.0" />
-        <PackageReference Include="LibGit2Sharp" Version="0.26.2" />
+        <PackageReference Include="LibGit2Sharp" Version="0.27.0-preview-0175" />
         <PackageReference Include="Microsoft.SyndicationFeed.ReaderWriter" Version="1.0.2" />
         <PackageReference Include="NuGet.Packaging" Version="6.1.0" />
         <PackageReference Include="NuGet.Protocol" Version="6.1.0" />
-        <PackageReference Include="System.CommandLine" Version="2.0.0-beta1.21216.1" />
-        <PackageReference Include="System.CommandLine.Hosting" Version="0.3.0-alpha.21216.1" />
+        <PackageReference Include="System.CommandLine" Version="2.0.0-beta3.22114.1" />
+        <PackageReference Include="System.CommandLine.Hosting" Version="0.4.0-alpha.22114.1" />
         <PackageReference Include="Tommy.Extensions.Configuration" Version="6.2.0" />
 
         <PackageReference Include="Serilog" Version="2.10.0" />

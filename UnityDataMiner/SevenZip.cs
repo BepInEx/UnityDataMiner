@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using NuGet.Packaging;
 
@@ -7,14 +9,14 @@ namespace UnityDataMiner;
 
 public class SevenZip
 {
-    public static async Task ExtractAsync(string archivePath, string outputDirectory, params string[] fileFilter)
+    public static async Task ExtractAsync(string archivePath, string outputDirectory, IEnumerable<string>? fileFilter = null, bool flat = true, CancellationToken cancellationToken = default)
     {
         var processStartInfo = new ProcessStartInfo("7z")
         {
             ArgumentList =
             {
-                "e", // extract
-                "-y", // assume Yes on all queries
+                flat ? "e" : "x",
+                "-y",
                 archivePath,
                 $"-o{outputDirectory}",
             },
@@ -22,11 +24,14 @@ public class SevenZip
             RedirectStandardError = true,
         };
 
-        processStartInfo.ArgumentList.AddRange(fileFilter);
+        if (fileFilter != null)
+        {
+            processStartInfo.ArgumentList.AddRange(fileFilter);
+        }
 
         var process = Process.Start(processStartInfo) ?? throw new SevenZipException("Couldn't start 7z process");
 
-        await process.WaitForExitAsync();
+        await process.WaitForExitAsync(cancellationToken);
 
         if (process.ExitCode != 0)
         {

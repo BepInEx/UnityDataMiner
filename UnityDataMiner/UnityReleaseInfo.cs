@@ -11,6 +11,7 @@ public record UnityBuildInfo(Dictionary<string, UnityBuildInfo.Module> Component
     public Module Unity => Components["Unity"];
 
     public Module? WindowsMono => Components.TryGetValue("Windows-Mono", out var result) || Components.TryGetValue("Windows", out result) ? result : null;
+    public Module? Android => Components.TryGetValue("Android", out var result) ? result : null;
 
     public static UnityBuildInfo Parse(string ini)
     {
