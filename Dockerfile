@@ -10,7 +10,7 @@ COPY ./UnityDataMiner /src
 RUN dotnet publish -c Release
 
 FROM run
-COPY --from=build /src/bin/Release/net5.0/publish /app
+COPY --from=build /src/bin/Release/net6.0/publish /app
 VOLUME [ "/data" ]
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/app/runtimes/alpine.3.9-x64/native"
 CMD [ "dotnet", "UnityDataMiner.dll", "--repository", "/data" ]
