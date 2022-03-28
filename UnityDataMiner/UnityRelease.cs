@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
@@ -35,13 +36,17 @@ namespace UnityDataMiner
 
         public string NuGetPackagePath { get; }
 
-        public string InfoCachePath { get; }
+        public string InfoCacheDir { get; }
+        
+        public string CorlibZipPath { get; }
 
-        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) || !Version.IsMonolithic() && !File.Exists(AndroidPath);
+        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) || !File.Exists(CorlibZipPath) || !Version.IsMonolithic() && !File.Exists(AndroidPath);
 
         public string BaseDownloadUrl => Version.GetDownloadUrl() + (Id == null ? string.Empty : $"{Id}/");
 
-        public UnityBuildInfo? Info { get; private set; }
+        public UnityBuildInfo? WindowsInfo { get; private set; }
+        public UnityBuildInfo? LinuxInfo { get; private set; }
+        public UnityBuildInfo? MacOsInfo { get; private set; }
 
         public UnityBuild(string repositoryPath, string? id, string version)
         {
@@ -70,47 +75,156 @@ namespace UnityDataMiner
             var zipName = $"{(Version.Type == UnityVersionType.Final ? ShortVersion : Version)}.zip";
             ZipFilePath = Path.Combine(repositoryPath, "libraries", zipName);
             AndroidPath = Path.Combine(repositoryPath, "android", zipName);
+            CorlibZipPath = Path.Combine(repositoryPath, "corlibs", zipName);
             NuGetPackagePath = Path.Combine(repositoryPath, "packages", $"{NuGetVersion}.nupkg");
-            InfoCachePath = Path.Combine(repositoryPath, "versions", $"{id}.ini");
+            InfoCacheDir = Path.Combine(repositoryPath, "versions", $"{id}");
+            WindowsInfo = ReadInfo("win");
+            LinuxInfo = ReadInfo("linux");
+            MacOsInfo = ReadInfo("osx");
         }
 
         private static readonly HttpClient _httpClient = new();
         private static readonly SemaphoreSlim _downloadLock = new(2, 2);
 
         private static readonly UnityVersion _firstLinuxVersion = new(2018, 1, 5);
+        // First modular version where own native player is included in the default installer
+        private static readonly UnityVersion _firstMergedModularVersion = new(5, 4);
+        
+        // TODO: Might need to define more DLLs? This should be enough for basic unhollowing.
+        private static readonly string[] _importantCorlibs =
+        {
+            "Microstof.CSharp",
+            "Mono.Posix",
+            "Mono.Security",
+            "mscorlib",
+            "Facades/netstandard",
+            "System.Configuration",
+            "System.Core",
+            "System.Data",
+            "System",
+            "System.Net.Http",
+            "System.Numerics",
+            "System.Runtime.Serialization",
+            "System.Security",
+            "System.Xml",
+            "System.Xml.Linq",
+        };
+
+        private bool HasLinuxEditor => Version >= _firstLinuxVersion;
+        private bool HasModularPlayer => Version >= _firstMergedModularVersion;
+        private bool IsMonolithic => Version.IsMonolithic();
+        
+        public bool NeedsInfoFetch { get; private set; }
+
+        private UnityBuildInfo? ReadInfo(string variation)
+        {
+            if (!Directory.Exists(InfoCacheDir))
+            {
+                NeedsInfoFetch = true;
+                return null;
+            }
+            
+            var path = Path.Combine(InfoCacheDir, $"{variation}.ini");
+            try
+            {
+                var variationIni = File.ReadAllText(path);
+                var info = UnityBuildInfo.Parse(variationIni);
+                if (info.Unity.Version != null && !info.Unity.Version.Equals(Version))
+                {
+                    throw new Exception();
+                }
+
+                return info;
+            }
+            catch (Exception)
+            {
+                NeedsInfoFetch = true;
+                return null;
+            }
+        }
 
         public async Task FetchInfoAsync(CancellationToken cancellationToken)
         {
-            var ini = await _httpClient.GetStringAsync(BaseDownloadUrl + $"unity-{Version}-{(Version >= _firstLinuxVersion ? "linux" : "osx")}.ini", cancellationToken);
-            var info = UnityBuildInfo.Parse(ini);
-
-            if (info.Unity.Version != null && !info.Unity.Version.Equals(Version))
+            if (!NeedsInfoFetch)
             {
-                throw new Exception($"Build info version is invalid (expected {Version}, got {info.Unity.Version})");
+                return;
+            }
+            
+            Directory.CreateDirectory(InfoCacheDir);
+            async Task<UnityBuildInfo?> FetchVariation(string variation)
+            {
+                string variationIni;
+                try
+                {
+                    variationIni = await _httpClient.GetStringAsync(BaseDownloadUrl + $"unity-{Version}-{variation}.ini", cancellationToken);
+                }
+                catch (HttpRequestException hre) when (hre.StatusCode == HttpStatusCode.Forbidden)
+                {
+                    return null;
+                }
+                var info = UnityBuildInfo.Parse(variationIni);
+                if (info.Unity.Version != null && !info.Unity.Version.Equals(Version))
+                {
+                    throw new Exception($"Build info version is invalid (expected {Version}, got {info.Unity.Version})");
+                }
+                await File.WriteAllTextAsync(Path.Combine(InfoCacheDir, $"{variation}.ini"), variationIni, cancellationToken);
+                return info;
             }
 
-            Info = info;
-
-            await File.WriteAllTextAsync(InfoCachePath, ini, cancellationToken);
+            WindowsInfo = await FetchVariation("win");
+            MacOsInfo = await FetchVariation("osx");
+            LinuxInfo = await FetchVariation("linux");
+            NeedsInfoFetch = false;
         }
 
-        public async Task MineAsync(CancellationToken cancellationToken)
+        private string GetDownloadFile(bool withCorlib)
         {
-            var monoDownloadUrl = BaseDownloadUrl + (Info == null
-                ? $"UnitySetup-{ShortVersion}.exe"
-                : (Info.WindowsMono ?? Info.Unity).Url);
+            var isLegacyDownload = Id == null || Version.Major < 5;
+            var editorDownloadPrefix = isLegacyDownload ? "UnitySetup-" : "UnitySetup64-";
+            
+            // TODO: Clean up (maybe make a general pipeline)
+            return withCorlib switch
+            {
+                true when LinuxInfo is not null => LinuxInfo.Unity.Url,
+                true when MacOsInfo is not null && HasModularPlayer => MacOsInfo.Unity.Url,
+                true => WindowsInfo?.Unity.Url ?? $"{editorDownloadPrefix}{ShortVersion}.exe",
 
-            var androidDownloadUrl = Info == null || Version.IsMonolithic() // TODO make monolithic handling better
+                false when LinuxInfo is not null => (LinuxInfo.WindowsMono ?? LinuxInfo.Unity).Url,
+                false when MacOsInfo is not null => (MacOsInfo.WindowsMono ?? MacOsInfo.Unity).Url,
+                false => WindowsInfo?.Unity?.Url ?? $"{editorDownloadPrefix}{ShortVersion}.exe",
+            };
+        }
+        
+        public async Task MineAsync(bool downloadCorlib, CancellationToken cancellationToken)
+        {
+            var isLegacyDownload = Id == null || Version.Major < 5;
+
+            var downloadFile = GetDownloadFile(downloadCorlib);
+            var monoDownloadFile = GetDownloadFile(false);
+
+            var monoDownloadUrl = BaseDownloadUrl + downloadFile;
+            var corlibDownloadUrl = "";
+            // For specific versions, the installer has no players at all
+            // So for corlib, download both the installer and the support module
+            if (downloadCorlib && !IsMonolithic && !HasModularPlayer)
+            {
+                corlibDownloadUrl = monoDownloadUrl;
+                monoDownloadUrl = BaseDownloadUrl + monoDownloadFile;
+            }
+
+            var androidDownloadUrl = (LinuxInfo == null && MacOsInfo == null) || Version.IsMonolithic() // TODO make monolithic handling better
                 ? null
-                : BaseDownloadUrl + Info.Android!.Url;
+                : BaseDownloadUrl + (LinuxInfo ?? MacOsInfo).Android!.Url;
 
             var tmpDirectory = Path.Combine(Path.GetTempPath(), "UnityDataMiner", Version.ToString());
             Directory.CreateDirectory(tmpDirectory);
 
             var managedDirectory = Path.Combine(tmpDirectory, "managed");
+            var corlibDirectory = Path.Combine(tmpDirectory, "corlib");
             var androidDirectory = Path.Combine(tmpDirectory, "android");
 
             var monoArchivePath = Path.Combine(tmpDirectory, Path.GetFileName(monoDownloadUrl));
+            var corlibArchivePath = !IsMonolithic && !HasModularPlayer ? Path.Combine(tmpDirectory, Path.GetFileName(corlibDownloadUrl)) : monoArchivePath;
             var androidArchivePath = androidDownloadUrl == null ? null : Path.Combine(tmpDirectory, Path.GetFileName(androidDownloadUrl));
 
             try
@@ -123,6 +237,11 @@ namespace UnityDataMiner
                         try
                         {
                             await DownloadAsync(monoDownloadUrl, monoArchivePath, cancellationToken);
+
+                            if (corlibDownloadUrl is not "")
+                            {
+                                await DownloadAsync(corlibDownloadUrl, corlibArchivePath, cancellationToken);
+                            }
 
                             if (androidDownloadUrl != null)
                             {
@@ -184,14 +303,17 @@ namespace UnityDataMiner
                 Log.Information("[{Version}] Extracting mono libraries", Version);
                 using (var stopwatch = new AutoStopwatch())
                 {
-                    var isLegacyDownload = Id == null || Version.Major < 5;
-
+                    // TODO: Clean up this massive mess
                     var monoPath = (Version.IsMonolithic(), isLegacyDownload) switch
                     {
                         (true, true) when Version.Major == 4 && Version.Minor >= 5 => "Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment/Data/Managed",
                         (true, true) => "Data/PlaybackEngines/windows64standaloneplayer/Managed",
+                        (true, false) when downloadCorlib => "Editor/Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment_mono/Data/Managed",
                         (true, false) => "./Unity/Unity.app/Contents/PlaybackEngines/WindowsStandaloneSupport/Variations/win64_nondevelopment_mono/Data/Managed",
                         (false, true) => throw new Exception("Release can't be both legacy and modular at the same time"),
+                        (false, false) when downloadCorlib && HasLinuxEditor => $"Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64{(Version >= new UnityVersion(2021, 2) ? "_player" : "_withgfx")}_nondevelopment_mono/Data/Managed",
+                        (false, false) when downloadCorlib && !HasLinuxEditor && HasModularPlayer => $"./Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_nondevelopment_mono/Data/Managed",
+                        (false, false) when downloadCorlib => "./Variations/win64_nondevelopment_mono/Data/Managed",
                         (false, false) => $"./Variations/win64{(Version >= new UnityVersion(2021, 2) ? "_player" : "")}_nondevelopment_mono/Data/Managed",
                     };
 
@@ -206,6 +328,30 @@ namespace UnityDataMiner
                     ZipFile.CreateFromDirectory(managedDirectory, ZipFilePath);
 
                     Log.Information("[{Version}] Extracted mono libraries in {Time}", Version, stopwatch.Elapsed);
+                }
+
+                if (downloadCorlib)
+                {
+                    using var stopwatch = new AutoStopwatch();
+                    // TODO: Maybe grab both 2.0 and 4.5 DLLs for < 2018 monos
+                    var corlibPath = isLegacyDownload switch
+                    {
+                        true => "Data/Mono/lib/mono/2.0",
+                        false when HasLinuxEditor || !HasModularPlayer => "Editor/Data/MonoBleedingEdge/lib/mono/4.5",
+                        false => "./Unity/Unity.app/Contents/MonoBleedingEdge/lib/mono/4.5",
+                    };
+                    
+                    await ExtractAsync(corlibArchivePath, corlibDirectory, _importantCorlibs.Select(s => $"{corlibPath}/{s}.dll").ToArray(), cancellationToken);
+                        
+                    if (!Directory.Exists(corlibDirectory) || Directory.GetFiles(corlibDirectory, "*.dll").Length <= 0)
+                    {
+                        throw new Exception("Corlibs directory is empty");
+                    }
+                        
+                    File.Delete(CorlibZipPath);
+                    ZipFile.CreateFromDirectory(corlibDirectory, CorlibZipPath);
+                        
+                    Log.Information("[{Version}] Extracted corlibs in {Time}", Version, stopwatch.Elapsed);
                 }
 
                 Log.Information("[{Version}] Creating NuGet package for mono libraries", Version);
@@ -261,6 +407,15 @@ namespace UnityDataMiner
                 {
                     await SevenZip.ExtractAsync(archivePath, destinationDirectory, filter, flat, cancellationToken);
 
+                    break;
+                }
+
+                case ".xz":
+                {
+                    string payloadName = Path.GetFileNameWithoutExtension(archivePath);
+                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] { payloadName }, true, cancellationToken);
+                    await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory, filter, flat, cancellationToken);
+                    
                     break;
                 }
 

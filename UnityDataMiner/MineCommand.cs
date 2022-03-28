@@ -27,6 +27,7 @@ public class MineCommand : RootCommand
             Arity = ArgumentArity.ZeroOrOne,
         });
         Add(new Option<DirectoryInfo>("--repository", () => new DirectoryInfo(Directory.GetCurrentDirectory())));
+        Add(new Option<bool>("--download-corlibs", () => false));
     }
 
     public new class Handler : ICommandHandler
@@ -36,6 +37,7 @@ public class MineCommand : RootCommand
 
         public string? Version { get; init; }
         public DirectoryInfo Repository { get; init; }
+        public bool DownloadCorlibs { get; init; }
 
         public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions)
         {
@@ -49,12 +51,13 @@ public class MineCommand : RootCommand
 
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "libraries"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "packages"));
+            Directory.CreateDirectory(Path.Combine(Repository.FullName, "corlibs"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "android"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "versions"));
 
             var unityVersions = await FetchUnityVersionsAsync(Repository.FullName);
 
-            await Parallel.ForEachAsync(unityVersions.Where(x => x.Version.Major >= 5 && x.Info == null), token, async (unityVersion, cancellationToken) =>
+            await Parallel.ForEachAsync(unityVersions.Where(x => x.Version.Major >= 5 && x.NeedsInfoFetch), token, async (unityVersion, cancellationToken) =>
             {
                 try
                 {
@@ -79,7 +82,7 @@ public class MineCommand : RootCommand
             {
                 try
                 {
-                    await unityVersion.MineAsync(cancellationToken);
+                    await unityVersion.MineAsync(DownloadCorlibs, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
