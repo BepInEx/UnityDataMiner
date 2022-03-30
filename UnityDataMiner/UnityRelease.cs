@@ -37,10 +37,12 @@ namespace UnityDataMiner
         public string NuGetPackagePath { get; }
 
         public string InfoCacheDir { get; }
-        
+
         public string CorlibZipPath { get; }
 
-        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) || !File.Exists(CorlibZipPath) || !Version.IsMonolithic() && !File.Exists(AndroidPath);
+        public string LibIl2CppZipPath { get; }
+
+        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) || !File.Exists(CorlibZipPath) || !File.Exists(LibIl2CppZipPath) || !Version.IsMonolithic() && !File.Exists(AndroidPath);
 
         public string BaseDownloadUrl => Version.GetDownloadUrl() + (Id == null ? string.Empty : $"{Id}/");
 
@@ -76,6 +78,7 @@ namespace UnityDataMiner
             ZipFilePath = Path.Combine(repositoryPath, "libraries", zipName);
             AndroidPath = Path.Combine(repositoryPath, "android", zipName);
             CorlibZipPath = Path.Combine(repositoryPath, "corlibs", zipName);
+            LibIl2CppZipPath = Path.Combine(repositoryPath, "libil2cpp", zipName);
             NuGetPackagePath = Path.Combine(repositoryPath, "packages", $"{NuGetVersion}.nupkg");
             InfoCacheDir = Path.Combine(repositoryPath, "versions", $"{id}");
             WindowsInfo = ReadInfo("win");
@@ -177,13 +180,13 @@ namespace UnityDataMiner
             NeedsInfoFetch = false;
         }
 
-        private string GetDownloadFile(bool withCorlib)
+        private string GetDownloadFile(bool downloadEditor)
         {
             var isLegacyDownload = Id == null || Version.Major < 5;
             var editorDownloadPrefix = isLegacyDownload ? "UnitySetup-" : "UnitySetup64-";
             
             // TODO: Clean up (maybe make a general pipeline)
-            return withCorlib switch
+            return downloadEditor switch
             {
                 true when LinuxInfo is not null => LinuxInfo.Unity.Url,
                 true when MacOsInfo is not null && HasModularPlayer => MacOsInfo.Unity.Url,
@@ -195,11 +198,11 @@ namespace UnityDataMiner
             };
         }
         
-        public async Task MineAsync(bool downloadCorlib, CancellationToken cancellationToken)
+        public async Task MineAsync(bool downloadCorlib, bool downloadLibIl2Cpp, CancellationToken cancellationToken)
         {
             var isLegacyDownload = Id == null || Version.Major < 5;
 
-            var downloadFile = GetDownloadFile(downloadCorlib);
+            var downloadFile = GetDownloadFile(downloadCorlib || downloadLibIl2Cpp);
             var monoDownloadFile = GetDownloadFile(false);
 
             var monoDownloadUrl = BaseDownloadUrl + downloadFile;
@@ -221,11 +224,13 @@ namespace UnityDataMiner
 
             var managedDirectory = Path.Combine(tmpDirectory, "managed");
             var corlibDirectory = Path.Combine(tmpDirectory, "corlib");
+            var libil2cppDirectory = Path.Combine(tmpDirectory, "libil2cpp");
             var androidDirectory = Path.Combine(tmpDirectory, "android");
 
             var monoArchivePath = Path.Combine(tmpDirectory, Path.GetFileName(monoDownloadUrl));
             var corlibArchivePath = !IsMonolithic && !HasModularPlayer ? Path.Combine(tmpDirectory, Path.GetFileName(corlibDownloadUrl)) : monoArchivePath;
             var androidArchivePath = androidDownloadUrl == null ? null : Path.Combine(tmpDirectory, Path.GetFileName(androidDownloadUrl));
+            var libil2cppArchivePath = downloadLibIl2Cpp ? Path.Combine(tmpDirectory, Path.GetFileName(downloadFile)) : null;
 
             try
             {
@@ -298,6 +303,26 @@ namespace UnityDataMiner
                     ZipFile.CreateFromDirectory(androidDirectory, AndroidPath);
 
                     Log.Information("[{Version}] Extracted android binaries in {Time}", Version, stopwatch.Elapsed);
+                }
+
+                if (downloadLibIl2Cpp && libil2cppArchivePath != null)
+                {
+                    Log.Information("[{Version}] Extracting libil2cpp", Version);
+                    using (var stopwatch = new AutoStopwatch())
+                    {
+                        // TODO: find out if the path changes in different versions
+                        var libil2cppPath = "Editor/Data/il2cpp/libil2cpp";
+                        await ExtractAsync(libil2cppArchivePath, libil2cppDirectory, new[] { $"{libil2cppPath}/**" }, cancellationToken, false);
+                        var zipDir = Path.Combine(libil2cppDirectory, libil2cppPath);
+                        if (!Directory.Exists(zipDir) || Directory.GetFiles(zipDir).Length <= 0)
+                        {
+                            throw new Exception("LibIl2Cpp directory is empty");
+                        }
+                        File.Delete(LibIl2CppZipPath);
+                        ZipFile.CreateFromDirectory(zipDir, LibIl2CppZipPath);
+
+                        Log.Information("[{Version}] Extracted libil2cpp in {Time}", Version, stopwatch.Elapsed);
+                    }
                 }
 
                 Log.Information("[{Version}] Extracting mono libraries", Version);
