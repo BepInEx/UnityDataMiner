@@ -28,7 +28,7 @@ public class MineCommand : RootCommand
         });
         Add(new Option<DirectoryInfo>("--repository", () => new DirectoryInfo(Directory.GetCurrentDirectory())));
         Add(new Option<bool>("--download-corlibs", () => false));
-        Add(new Option<bool>("--download-libil2cpp", () => false));
+        Add(new Option<bool>("--download-libil2cpp-source", () => false));
     }
 
     public new class Handler : ICommandHandler
@@ -39,7 +39,7 @@ public class MineCommand : RootCommand
         public string? Version { get; init; }
         public DirectoryInfo Repository { get; init; }
         public bool DownloadCorlibs { get; init; }
-        public bool DownloadLibIl2Cpp { get; init; }
+        public bool DownloadLibIl2CppSource { get; init; }
 
         public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions)
         {
@@ -54,7 +54,7 @@ public class MineCommand : RootCommand
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "libraries"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "packages"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "corlibs"));
-            Directory.CreateDirectory(Path.Combine(Repository.FullName, "libil2cpp"));
+            Directory.CreateDirectory(Path.Combine(Repository.FullName, "libil2cpp-source"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "android"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "versions"));
 
@@ -85,7 +85,7 @@ public class MineCommand : RootCommand
             {
                 try
                 {
-                    await unityVersion.MineAsync(DownloadCorlibs, DownloadLibIl2Cpp, cancellationToken);
+                    await unityVersion.MineAsync(DownloadCorlibs, DownloadLibIl2CppSource, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
