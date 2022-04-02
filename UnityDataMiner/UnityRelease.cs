@@ -42,7 +42,7 @@ namespace UnityDataMiner
 
         public string LibIl2CppSourceZipPath { get; }
 
-        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) || !File.Exists(CorlibZipPath) || !File.Exists(LibIl2CppSourceZipPath) || !Version.IsMonolithic() && !File.Exists(AndroidPath);
+        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) || !File.Exists(CorlibZipPath) || (HasLibIl2Cpp && !File.Exists(LibIl2CppSourceZipPath)) || !Version.IsMonolithic() && !File.Exists(AndroidPath);
 
         public string BaseDownloadUrl => Version.GetDownloadUrl() + (Id == null ? string.Empty : $"{Id}/");
 
@@ -92,6 +92,7 @@ namespace UnityDataMiner
         private static readonly UnityVersion _firstLinuxVersion = new(2018, 1, 5);
         // First modular version where own native player is included in the default installer
         private static readonly UnityVersion _firstMergedModularVersion = new(5, 4);
+        private static readonly UnityVersion _firstLibIl2CppVersion = new(5, 0, 2);
         
         // TODO: Might need to define more DLLs? This should be enough for basic unhollowing.
         private static readonly string[] _importantCorlibs =
@@ -113,9 +114,10 @@ namespace UnityDataMiner
             "System.Xml.Linq",
         };
 
-        private bool HasLinuxEditor => Version >= _firstLinuxVersion;
+        private bool HasLinuxEditor => LinuxInfo is not null || Version >= _firstLinuxVersion;
         private bool HasModularPlayer => Version >= _firstMergedModularVersion;
         private bool IsMonolithic => Version.IsMonolithic();
+        private bool HasLibIl2Cpp => Version >= _firstLibIl2CppVersion;
         
         public bool NeedsInfoFetch { get; private set; }
 
@@ -201,6 +203,7 @@ namespace UnityDataMiner
         public async Task MineAsync(bool downloadCorlib, bool downloadLibIl2CppSource, CancellationToken cancellationToken)
         {
             var isLegacyDownload = Id == null || Version.Major < 5;
+            downloadLibIl2CppSource &= HasLibIl2Cpp;
 
             var downloadFile = GetDownloadFile(downloadCorlib || downloadLibIl2CppSource);
             var monoDownloadFile = GetDownloadFile(false);
@@ -311,7 +314,12 @@ namespace UnityDataMiner
                     using (var stopwatch = new AutoStopwatch())
                     {
                         // TODO: find out if the path changes in different versions
-                        var libil2cppSourcePath = "Editor/Data/il2cpp/libil2cpp";
+                        var libil2cppSourcePath = HasLinuxEditor switch
+                        {
+                            true => "Editor/Data/il2cpp/libil2cpp",
+                            false when HasModularPlayer => "./Unity/Unity.app/Contents/il2cpp/libil2cpp",
+                            false => "Editor/Data/il2cpp/libil2cpp",
+                        };
                         await ExtractAsync(libil2cppSourceArchivePath, libil2cppSourceDirectory, new[] { $"{libil2cppSourcePath}/**" }, cancellationToken, false);
                         var zipDir = Path.Combine(libil2cppSourceDirectory, libil2cppSourcePath);
                         if (!Directory.Exists(zipDir) || Directory.GetFiles(zipDir).Length <= 0)
