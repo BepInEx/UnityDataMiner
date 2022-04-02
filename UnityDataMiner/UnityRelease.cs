@@ -97,7 +97,7 @@ namespace UnityDataMiner
         // TODO: Might need to define more DLLs? This should be enough for basic unhollowing.
         private static readonly string[] _importantCorlibs =
         {
-            "Microstof.CSharp",
+            "Microsoft.CSharp",
             "Mono.Posix",
             "Mono.Security",
             "mscorlib",
