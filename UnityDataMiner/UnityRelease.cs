@@ -90,10 +90,11 @@ namespace UnityDataMiner
         private static readonly SemaphoreSlim _downloadLock = new(2, 2);
 
         private static readonly UnityVersion _firstLinuxVersion = new(2018, 1, 5);
+
         // First modular version where own native player is included in the default installer
         private static readonly UnityVersion _firstMergedModularVersion = new(5, 4);
         private static readonly UnityVersion _firstLibIl2CppVersion = new(5, 0, 2);
-        
+
         // TODO: Might need to define more DLLs? This should be enough for basic unhollowing.
         private static readonly string[] _importantCorlibs =
         {
@@ -118,7 +119,7 @@ namespace UnityDataMiner
         private bool HasModularPlayer => Version >= _firstMergedModularVersion;
         private bool IsMonolithic => Version.IsMonolithic();
         private bool HasLibIl2Cpp => Version >= _firstLibIl2CppVersion;
-        
+
         public bool NeedsInfoFetch { get; private set; }
 
         private UnityBuildInfo? ReadInfo(string variation)
@@ -128,7 +129,7 @@ namespace UnityDataMiner
                 NeedsInfoFetch = true;
                 return null;
             }
-            
+
             var path = Path.Combine(InfoCacheDir, $"{variation}.ini");
             try
             {
@@ -154,8 +155,9 @@ namespace UnityDataMiner
             {
                 return;
             }
-            
+
             Directory.CreateDirectory(InfoCacheDir);
+
             async Task<UnityBuildInfo?> FetchVariation(string variation)
             {
                 string variationIni;
@@ -167,11 +169,13 @@ namespace UnityDataMiner
                 {
                     return null;
                 }
+
                 var info = UnityBuildInfo.Parse(variationIni);
                 if (info.Unity.Version != null && !info.Unity.Version.Equals(Version))
                 {
                     throw new Exception($"Build info version is invalid (expected {Version}, got {info.Unity.Version})");
                 }
+
                 await File.WriteAllTextAsync(Path.Combine(InfoCacheDir, $"{variation}.ini"), variationIni, cancellationToken);
                 return info;
             }
@@ -186,7 +190,7 @@ namespace UnityDataMiner
         {
             var isLegacyDownload = Id == null || Version.Major < 5;
             var editorDownloadPrefix = isLegacyDownload ? "UnitySetup-" : "UnitySetup64-";
-            
+
             // TODO: Clean up (maybe make a general pipeline)
             return downloadEditor switch
             {
@@ -199,7 +203,7 @@ namespace UnityDataMiner
                 false => WindowsInfo?.Unity?.Url ?? $"{editorDownloadPrefix}{ShortVersion}.exe",
             };
         }
-        
+
         public async Task MineAsync(bool downloadCorlib, bool downloadLibIl2CppSource, CancellationToken cancellationToken)
         {
             var isLegacyDownload = Id == null || Version.Major < 5;
@@ -326,6 +330,7 @@ namespace UnityDataMiner
                         {
                             throw new Exception("LibIl2Cpp source code directory is empty");
                         }
+
                         File.Delete(LibIl2CppSourceZipPath);
                         ZipFile.CreateFromDirectory(zipDir, LibIl2CppSourceZipPath);
 
@@ -373,17 +378,17 @@ namespace UnityDataMiner
                         false when HasLinuxEditor || !HasModularPlayer => "Editor/Data/MonoBleedingEdge/lib/mono/4.5",
                         false => "./Unity/Unity.app/Contents/MonoBleedingEdge/lib/mono/4.5",
                     };
-                    
+
                     await ExtractAsync(corlibArchivePath, corlibDirectory, _importantCorlibs.Select(s => $"{corlibPath}/{s}.dll").ToArray(), cancellationToken);
-                        
+
                     if (!Directory.Exists(corlibDirectory) || Directory.GetFiles(corlibDirectory, "*.dll").Length <= 0)
                     {
                         throw new Exception("Corlibs directory is empty");
                     }
-                        
+
                     File.Delete(CorlibZipPath);
                     ZipFile.CreateFromDirectory(corlibDirectory, CorlibZipPath);
-                        
+
                     Log.Information("[{Version}] Extracted corlibs in {Time}", Version, stopwatch.Elapsed);
                 }
 
@@ -448,7 +453,7 @@ namespace UnityDataMiner
                     string payloadName = Path.GetFileNameWithoutExtension(archivePath);
                     await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] { payloadName }, true, cancellationToken);
                     await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory, filter, flat, cancellationToken);
-                    
+
                     break;
                 }
 
