@@ -9,6 +9,20 @@ namespace UnityDataMiner;
 
 public class SevenZip
 {
+    public static async Task EnsureInstalled(CancellationToken cancellationToken = default)
+    {
+        var process = Process.Start(new ProcessStartInfo("7z", "--help")
+        {
+            RedirectStandardOutput = true,
+        }) ?? throw new SevenZipException("Couldn't start 7z process");
+        await process.WaitForExitAsync(cancellationToken);
+
+        if (process.ExitCode != 0)
+        {
+            throw new EuUnstripException("7z is not installed");
+        }
+    }
+
     public static async Task ExtractAsync(string archivePath, string outputDirectory, IEnumerable<string>? fileFilter = null, bool flat = true, CancellationToken cancellationToken = default)
     {
         var processStartInfo = new ProcessStartInfo("7z")

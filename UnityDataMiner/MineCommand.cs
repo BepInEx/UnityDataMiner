@@ -49,6 +49,9 @@ public class MineCommand : RootCommand
 
         public async Task<int> InvokeAsync(InvocationContext context)
         {
+            await SevenZip.EnsureInstalled();
+            await EuUnstrip.EnsureInstalled();
+            
             var token = context.GetCancellationToken();
 
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "libraries"));

@@ -292,7 +292,10 @@ namespace UnityDataMiner
                     Directory.CreateDirectory(androidDirectory);
 
                     IEnumerable<string> directories = Directory.GetDirectories(Path.Combine(archiveDirectory, libs));
-                    if (Version > new UnityVersion(5, 3, 5, UnityVersionType.Final, 1))
+
+                    var hasSymbols = Version > new UnityVersion(5, 3, 5, UnityVersionType.Final, 1);
+                    
+                    if (hasSymbols)
                     {
                         directories = directories.Concat(Directory.GetDirectories(Path.Combine(archiveDirectory, symbols)));
                     }
@@ -303,6 +306,14 @@ namespace UnityDataMiner
                         foreach (var file in Directory.GetFiles(directory))
                         {
                             File.Copy(file, Path.Combine(directoryInfo.FullName, Path.GetFileName(file)), true);
+                        }
+                    }
+
+                    if (hasSymbols)
+                    {
+                        foreach (var directory in Directory.GetDirectories(androidDirectory))
+                        {
+                            await EuUnstrip.UnstripAsync(Path.Combine(directory, "libunity.so"), Path.Combine(directory, "libunity.sym.so"), cancellationToken);
                         }
                     }
 
