@@ -9,6 +9,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
+using AssetRipper.VersionUtilities;
 using HtmlAgilityPack;
 using LibGit2Sharp;
 using Microsoft.Extensions.Logging;
@@ -124,7 +125,7 @@ public class MineCommand : RootCommand
             var unityVersions = new List<UnityBuild>();
             unityVersions.AddRange(await FetchStableUnityVersionsAsync(repositoryPath));
             unityVersions.AddRange(await FetchBetaUnityVersionsAsync(repositoryPath));
-            // TODO fill missing with versions/*.ini (make sure to take only latest final versions)
+            await FillMissingUnityVersionsAsync(repositoryPath, unityVersions);
             return unityVersions;
         }
 
@@ -207,6 +208,31 @@ public class MineCommand : RootCommand
             _logger.LogInformation("Found {Count} beta unity versions", unityVersions.Count);
 
             return unityVersions;
+        }
+
+        private async Task FillMissingUnityVersionsAsync(string repositoryPath, List<UnityBuild> unityVersions)
+        {
+            var versionsCachePath = Path.Combine(repositoryPath, "versions");
+            if (!Directory.Exists(versionsCachePath)) return;
+
+            var filledUnityVersions = new List<UnityBuild>();
+
+            await Parallel.ForEachAsync(Directory.GetDirectories(versionsCachePath), async (versionCachePath, token) =>
+            {
+                var unityBuildInfo = UnityBuildInfo.Parse(await File.ReadAllTextAsync(Path.Combine(versionCachePath, "win.ini"), token));
+                if (unityBuildInfo.Unity.Title == "Unity 5") return;
+
+                var rawUnityVersion = unityBuildInfo.Unity.Title.Replace("Unity ", "");
+                var unityVersion = UnityVersion.Parse(rawUnityVersion);
+
+                if (unityVersions.All(x => x.Version != unityVersion))
+                {
+                    filledUnityVersions.Add(new UnityBuild(repositoryPath, Path.GetFileName(versionCachePath), rawUnityVersion));
+                }
+            });
+
+            unityVersions.AddRange(filledUnityVersions);
+            _logger.LogInformation("Filled {Count} unity versions", filledUnityVersions.Count);
         }
 
         private void UpdateGitRepository(string repositoryPath, List<UnityBuild> unityVersions)
