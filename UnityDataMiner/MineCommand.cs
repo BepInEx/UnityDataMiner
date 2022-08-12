@@ -248,50 +248,11 @@ public class MineCommand : RootCommand
 
             if (currentCommit == null || changes.Any())
             {
-                var mono = new HashSet<UnityBuild>();
-                var android = new HashSet<UnityBuild>();
-
-                if (changes != null)
-                {
-                    foreach (var added in changes.Added)
-                    {
-                        var path = added.Path;
-
-                        if (path.StartsWith("libraries/"))
-                        {
-                            mono.Add(unityVersions.Single(x => x.ZipFilePath.EndsWith(added.Path)));
-                        }
-                        else if (path.StartsWith("android/"))
-                        {
-                            android.Add(unityVersions.Single(x => x.AndroidPath.EndsWith(string.Join("/", added.Path.Split("/").Take(3)))));
-                        }
-                    }
-                }
-
-                _logger.LogInformation("Compared");
-
-                var message = new StringBuilder("Automatically mined");
-
-                if (mono.Any() || android.Any())
-                {
-                    message.AppendLine();
-
-                    if (mono.Any())
-                    {
-                        message.AppendLine($"Added unity libraries for {string.Join(", ", mono.OrderBy(x => x.Version).Select(x => x.Version))}");
-                    }
-
-                    if (android.Any())
-                    {
-                        message.AppendLine($"Added android binaries for {string.Join(", ", android.OrderBy(x => x.Version).Select(x => x.Version))}");
-                    }
-                }
-
                 var author = new Signature("UnityDataMiner", "UnityDataMiner@bepinex.dev", DateTimeOffset.Now);
 
                 _logger.LogInformation("Committing");
 
-                var commit = repository.Commit(message.ToString(), author, author);
+                var commit = repository.Commit("Automatically mined", author, author);
 
                 _logger.LogInformation("Committed {Sha}", commit.Sha);
 
