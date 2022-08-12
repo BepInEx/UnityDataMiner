@@ -28,8 +28,6 @@ public class MineCommand : RootCommand
             Arity = ArgumentArity.ZeroOrOne,
         });
         Add(new Option<DirectoryInfo>("--repository", () => new DirectoryInfo(Directory.GetCurrentDirectory())));
-        Add(new Option<bool>("--download-corlibs", () => false));
-        Add(new Option<bool>("--download-libil2cpp-source", () => false));
     }
 
     public new class Handler : ICommandHandler
@@ -39,8 +37,6 @@ public class MineCommand : RootCommand
 
         public string? Version { get; init; }
         public DirectoryInfo Repository { get; init; }
-        public bool DownloadCorlibs { get; init; }
-        public bool DownloadLibIl2CppSource { get; init; }
 
         public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions)
         {
@@ -89,7 +85,7 @@ public class MineCommand : RootCommand
             {
                 try
                 {
-                    await unityVersion.MineAsync(DownloadCorlibs, DownloadLibIl2CppSource, cancellationToken);
+                    await unityVersion.MineAsync(cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
