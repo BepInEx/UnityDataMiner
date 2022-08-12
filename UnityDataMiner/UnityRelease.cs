@@ -42,7 +42,7 @@ namespace UnityDataMiner
 
         public string LibIl2CppSourceZipPath { get; }
 
-        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) || !File.Exists(CorlibZipPath) || (HasLibIl2Cpp && !File.Exists(LibIl2CppSourceZipPath)) || !Version.IsMonolithic() && !File.Exists(AndroidPath);
+        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) || !File.Exists(CorlibZipPath) || (HasLibIl2Cpp && !File.Exists(LibIl2CppSourceZipPath)) || !Version.IsMonolithic() && !Directory.Exists(AndroidPath);
 
         public string BaseDownloadUrl => Version.GetDownloadUrl() + (Id == null ? string.Empty : $"{Id}/");
 
@@ -74,9 +74,10 @@ namespace UnityDataMiner
                     _ => throw new ArgumentOutOfRangeException(nameof(Version.Type), Version.Type, "Invalid Version.Type for " + Version),
                 } + "." + Version.TypeNumber);
 
-            var zipName = $"{(Version.Type == UnityVersionType.Final ? ShortVersion : Version)}.zip";
+            var versionName = Version.Type == UnityVersionType.Final ? ShortVersion : Version.ToString();
+            var zipName = $"{versionName}.zip";
             ZipFilePath = Path.Combine(repositoryPath, "libraries", zipName);
-            AndroidPath = Path.Combine(repositoryPath, "android", zipName);
+            AndroidPath = Path.Combine(repositoryPath, "android", versionName);
             CorlibZipPath = Path.Combine(repositoryPath, "corlibs", zipName);
             LibIl2CppSourceZipPath = Path.Combine(repositoryPath, "libil2cpp-source", zipName);
             NuGetPackagePath = Path.Combine(repositoryPath, "packages", $"{NuGetVersion}.nupkg");
@@ -321,8 +322,12 @@ namespace UnityDataMiner
                         }
                     }
 
-                    File.Delete(AndroidPath);
-                    ZipFile.CreateFromDirectory(androidDirectory, AndroidPath);
+                    Directory.CreateDirectory(AndroidPath);
+                    
+                    foreach (var directory in Directory.GetDirectories(androidDirectory))
+                    {
+                        ZipFile.CreateFromDirectory(directory, Path.Combine(AndroidPath, Path.GetFileName(directory) + ".zip"));
+                    }
 
                     Log.Information("[{Version}] Extracted android binaries in {Time}", Version, stopwatch.Elapsed);
                 }
