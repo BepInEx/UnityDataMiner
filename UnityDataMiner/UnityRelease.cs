@@ -9,6 +9,7 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using AssetRipper.VersionUtilities;
+using BepInEx.AssemblyPublicizer;
 using NuGet.Common;
 using NuGet.Frameworks;
 using NuGet.Packaging;
@@ -489,7 +490,7 @@ namespace UnityDataMiner
         private void CreateNuGetPackage(string pkgDir)
         {
             foreach (var file in Directory.EnumerateFiles(pkgDir, "*.dll"))
-                AssemblyStripper.StripAssembly(file);
+                AssemblyPublicizer.Publicize(file, file, new AssemblyPublicizerOptions { Strip = true });
 
             var deps = new[] { "net35", "net45", "netstandard2.0" };
 
