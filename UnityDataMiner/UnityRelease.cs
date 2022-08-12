@@ -281,7 +281,7 @@ namespace UnityDataMiner
                     }
                 }
 
-                if (androidDownloadUrl != null)
+                if (androidDownloadUrl != null && !Directory.Exists(AndroidPath))
                 {
                     Log.Information("[{Version}] Extracting android binaries", Version);
                     using var stopwatch = new AutoStopwatch();
@@ -327,83 +327,94 @@ namespace UnityDataMiner
                     Log.Information("[{Version}] Extracted android binaries in {Time}", Version, stopwatch.Elapsed);
                 }
 
-                Log.Information("[{Version}] Extracting libil2cpp source code", Version);
-                using (var stopwatch = new AutoStopwatch())
+                if (!File.Exists(LibIl2CppSourceZipPath))
                 {
-                    // TODO: find out if the path changes in different versions
-                    var libil2cppSourcePath = HasLinuxEditor switch
+                    Log.Information("[{Version}] Extracting libil2cpp source code", Version);
+                    using (var stopwatch = new AutoStopwatch())
                     {
-                        true => "Editor/Data/il2cpp/libil2cpp",
-                        false when HasModularPlayer => "./Unity/Unity.app/Contents/il2cpp/libil2cpp",
-                        false => "Editor/Data/il2cpp/libil2cpp",
-                    };
-                    await ExtractAsync(libil2cppSourceArchivePath, libil2cppSourceDirectory, new[] { $"{libil2cppSourcePath}/**" }, cancellationToken, false);
-                    var zipDir = Path.Combine(libil2cppSourceDirectory, libil2cppSourcePath);
-                    if (!Directory.Exists(zipDir) || Directory.GetFiles(zipDir).Length <= 0)
-                    {
-                        throw new Exception("LibIl2Cpp source code directory is empty");
+                        // TODO: find out if the path changes in different versions
+                        var libil2cppSourcePath = HasLinuxEditor switch
+                        {
+                            true => "Editor/Data/il2cpp/libil2cpp",
+                            false when HasModularPlayer => "./Unity/Unity.app/Contents/il2cpp/libil2cpp",
+                            false => "Editor/Data/il2cpp/libil2cpp",
+                        };
+                        await ExtractAsync(libil2cppSourceArchivePath, libil2cppSourceDirectory, new[] { $"{libil2cppSourcePath}/**" }, cancellationToken, false);
+                        var zipDir = Path.Combine(libil2cppSourceDirectory, libil2cppSourcePath);
+                        if (!Directory.Exists(zipDir) || Directory.GetFiles(zipDir).Length <= 0)
+                        {
+                            throw new Exception("LibIl2Cpp source code directory is empty");
+                        }
+
+                        File.Delete(LibIl2CppSourceZipPath);
+                        ZipFile.CreateFromDirectory(zipDir, LibIl2CppSourceZipPath);
+
+                        Log.Information("[{Version}] Extracted libil2cpp source code in {Time}", Version, stopwatch.Elapsed);
                     }
-
-                    File.Delete(LibIl2CppSourceZipPath);
-                    ZipFile.CreateFromDirectory(zipDir, LibIl2CppSourceZipPath);
-
-                    Log.Information("[{Version}] Extracted libil2cpp source code in {Time}", Version, stopwatch.Elapsed);
                 }
 
-                Log.Information("[{Version}] Extracting mono libraries", Version);
-                using (var stopwatch = new AutoStopwatch())
+                if (!File.Exists(LibIl2CppSourceZipPath))
                 {
-                    // TODO: Clean up this massive mess
-                    var monoPath = (Version.IsMonolithic(), isLegacyDownload) switch
+                    Log.Information("[{Version}] Extracting mono libraries", Version);
+                    using (var stopwatch = new AutoStopwatch())
                     {
-                        (true, true) when Version.Major == 4 && Version.Minor >= 5 => "Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment/Data/Managed",
-                        (true, true) => "Data/PlaybackEngines/windows64standaloneplayer/Managed",
-                        (true, false) => "Editor/Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment_mono/Data/Managed",
-                        (false, true) => throw new Exception("Release can't be both legacy and modular at the same time"),
-                        (false, false) when HasLinuxEditor => $"Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64{(Version >= new UnityVersion(2021, 2) ? "_player" : "_withgfx")}_nondevelopment_mono/Data/Managed",
-                        (false, false) when !HasLinuxEditor && HasModularPlayer => $"./Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_nondevelopment_mono/Data/Managed",
-                        (false, false) => "./Variations/win64_nondevelopment_mono/Data/Managed",
-                    };
+                        // TODO: Clean up this massive mess
+                        var monoPath = (Version.IsMonolithic(), isLegacyDownload) switch
+                        {
+                            (true, true) when Version.Major == 4 && Version.Minor >= 5 => "Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment/Data/Managed",
+                            (true, true) => "Data/PlaybackEngines/windows64standaloneplayer/Managed",
+                            (true, false) => "Editor/Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment_mono/Data/Managed",
+                            (false, true) => throw new Exception("Release can't be both legacy and modular at the same time"),
+                            (false, false) when HasLinuxEditor => $"Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64{(Version >= new UnityVersion(2021, 2) ? "_player" : "_withgfx")}_nondevelopment_mono/Data/Managed",
+                            (false, false) when !HasLinuxEditor && HasModularPlayer => $"./Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_nondevelopment_mono/Data/Managed",
+                            (false, false) => "./Variations/win64_nondevelopment_mono/Data/Managed",
+                        };
 
-                    await ExtractAsync(monoArchivePath, managedDirectory, new[] { $"{monoPath}/*.dll" }, cancellationToken);
+                        await ExtractAsync(monoArchivePath, managedDirectory, new[] { $"{monoPath}/*.dll" }, cancellationToken);
 
-                    if (!Directory.Exists(managedDirectory) || Directory.GetFiles(managedDirectory, "*.dll").Length <= 0)
-                    {
-                        throw new Exception("Managed directory is empty");
+                        if (!Directory.Exists(managedDirectory) || Directory.GetFiles(managedDirectory, "*.dll").Length <= 0)
+                        {
+                            throw new Exception("Managed directory is empty");
+                        }
+
+                        File.Delete(ZipFilePath);
+                        ZipFile.CreateFromDirectory(managedDirectory, ZipFilePath);
+
+                        Log.Information("[{Version}] Extracted mono libraries in {Time}", Version, stopwatch.Elapsed);
                     }
-
-                    File.Delete(ZipFilePath);
-                    ZipFile.CreateFromDirectory(managedDirectory, ZipFilePath);
-
-                    Log.Information("[{Version}] Extracted mono libraries in {Time}", Version, stopwatch.Elapsed);
                 }
 
-                using (var stopwatch = new AutoStopwatch())
+                if (!File.Exists(CorlibZipPath))
                 {
-                    // TODO: Maybe grab both 2.0 and 4.5 DLLs for < 2018 monos
-                    var corlibPath = isLegacyDownload switch
+                    using (var stopwatch = new AutoStopwatch())
                     {
-                        true => "Data/Mono/lib/mono/2.0",
-                        false when HasLinuxEditor || !HasModularPlayer => "Editor/Data/MonoBleedingEdge/lib/mono/4.5",
-                        false => "./Unity/Unity.app/Contents/MonoBleedingEdge/lib/mono/4.5",
-                    };
+                        // TODO: Maybe grab both 2.0 and 4.5 DLLs for < 2018 monos
+                        var corlibPath = isLegacyDownload switch
+                        {
+                            true => "Data/Mono/lib/mono/2.0",
+                            false when HasLinuxEditor || !HasModularPlayer => "Editor/Data/MonoBleedingEdge/lib/mono/4.5",
+                            false => "./Unity/Unity.app/Contents/MonoBleedingEdge/lib/mono/4.5",
+                        };
 
-                    await ExtractAsync(corlibArchivePath, corlibDirectory, _importantCorlibs.Select(s => $"{corlibPath}/{s}.dll").ToArray(), cancellationToken);
+                        await ExtractAsync(corlibArchivePath, corlibDirectory, _importantCorlibs.Select(s => $"{corlibPath}/{s}.dll").ToArray(), cancellationToken);
 
-                    if (!Directory.Exists(corlibDirectory) || Directory.GetFiles(corlibDirectory, "*.dll").Length <= 0)
-                    {
-                        throw new Exception("Corlibs directory is empty");
+                        if (!Directory.Exists(corlibDirectory) || Directory.GetFiles(corlibDirectory, "*.dll").Length <= 0)
+                        {
+                            throw new Exception("Corlibs directory is empty");
+                        }
+
+                        File.Delete(CorlibZipPath);
+                        ZipFile.CreateFromDirectory(corlibDirectory, CorlibZipPath);
+
+                        Log.Information("[{Version}] Extracted corlibs in {Time}", Version, stopwatch.Elapsed);
                     }
-
-                    File.Delete(CorlibZipPath);
-                    ZipFile.CreateFromDirectory(corlibDirectory, CorlibZipPath);
-
-                    Log.Information("[{Version}] Extracted corlibs in {Time}", Version, stopwatch.Elapsed);
                 }
 
-                Log.Information("[{Version}] Creating NuGet package for mono libraries", Version);
-
-                CreateNuGetPackage(managedDirectory);
+                if (!File.Exists(NuGetPackagePath))
+                {
+                    Log.Information("[{Version}] Creating NuGet package for mono libraries", Version);
+                    CreateNuGetPackage(managedDirectory);
+                }
             }
             finally
             {
