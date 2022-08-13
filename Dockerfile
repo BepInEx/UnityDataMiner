@@ -1,6 +1,6 @@
 FROM mcr.microsoft.com/dotnet/runtime:6.0-alpine as run
 WORKDIR /app
-RUN apk add p7zip cpio git
+RUN apk add p7zip cpio git elfutils
 
 FROM mcr.microsoft.com/dotnet/sdk:6.0-alpine as build
 WORKDIR /src
