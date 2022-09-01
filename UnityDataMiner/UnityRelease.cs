@@ -359,7 +359,7 @@ namespace UnityDataMiner
                     }
                 }
 
-                if (!File.Exists(LibIl2CppSourceZipPath))
+                if (!File.Exists(ZipFilePath))
                 {
                     Log.Information("[{Version}] Extracting mono libraries", Version);
                     using (var stopwatch = new AutoStopwatch())
