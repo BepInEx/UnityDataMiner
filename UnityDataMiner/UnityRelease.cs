@@ -305,7 +305,7 @@ namespace UnityDataMiner
                     {
                         directories = directories.Concat(Directory.GetDirectories(Path.Combine(archiveDirectory, symbols)));
                     }
-
+                
                     foreach (var directory in directories)
                     {
                         var directoryInfo = Directory.CreateDirectory(Path.Combine(androidDirectory, Path.GetFileName(directory)));
@@ -314,7 +314,7 @@ namespace UnityDataMiner
                             File.Copy(file, Path.Combine(directoryInfo.FullName, Path.GetFileName(file)), true);
                         }
                     }
-
+                
                     if (hasSymbols)
                     {
                         foreach (var directory in Directory.GetDirectories(androidDirectory))
@@ -322,18 +322,18 @@ namespace UnityDataMiner
                             await EuUnstrip.UnstripAsync(Path.Combine(directory, "libunity.so"), Path.Combine(directory, "libunity.sym.so"), cancellationToken);
                         }
                     }
-
+                
                     Directory.CreateDirectory(AndroidPath);
                     
                     foreach (var directory in Directory.GetDirectories(androidDirectory))
                     {
                         ZipFile.CreateFromDirectory(directory, Path.Combine(AndroidPath, Path.GetFileName(directory) + ".zip"));
                     }
-
+                
                     Log.Information("[{Version}] Extracted android binaries in {Time}", Version, stopwatch.Elapsed);
                 }
 
-                if (!File.Exists(LibIl2CppSourceZipPath))
+                if (!File.Exists(ZipFilePath))
                 {
                     Log.Information("[{Version}] Extracting libil2cpp source code", Version);
                     using (var stopwatch = new AutoStopwatch())
@@ -351,11 +351,40 @@ namespace UnityDataMiner
                         {
                             throw new Exception("LibIl2Cpp source code directory is empty");
                         }
-
+                
                         File.Delete(LibIl2CppSourceZipPath);
                         ZipFile.CreateFromDirectory(zipDir, LibIl2CppSourceZipPath);
-
+                
                         Log.Information("[{Version}] Extracted libil2cpp source code in {Time}", Version, stopwatch.Elapsed);
+                    }
+                }
+                
+                async Task ExtractManagedDir()
+                {
+                    var exists = () =>
+                        Directory.Exists(managedDirectory) && Directory.GetFiles(managedDirectory, "*.dll").Length > 0;
+                    if (exists())
+                    {
+                        return;
+                    }
+
+                    // TODO: Clean up this massive mess
+                    var monoPath = (Version.IsMonolithic(), isLegacyDownload) switch
+                    {
+                        (true, true) when Version.Major == 4 && Version.Minor >= 5 => "Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment/Data/Managed",
+                        (true, true) => "Data/PlaybackEngines/windows64standaloneplayer/Managed",
+                        (true, false) => "Editor/Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment_mono/Data/Managed",
+                        (false, true) => throw new Exception("Release can't be both legacy and modular at the same time"),
+                        (false, false) when HasLinuxEditor => $"Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64{(Version >= new UnityVersion(2021, 2) ? "_player" : "_withgfx")}_nondevelopment_mono/Data/Managed",
+                        (false, false) when !HasLinuxEditor && HasModularPlayer => $"./Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_nondevelopment_mono/Data/Managed",
+                        (false, false) => "./Variations/win64_nondevelopment_mono/Data/Managed",
+                    };
+
+                    await ExtractAsync(monoArchivePath, managedDirectory, new[] { $"{monoPath}/*.dll" }, cancellationToken);
+
+                    if (!exists())
+                    {
+                        throw new Exception("Managed directory is empty");
                     }
                 }
 
@@ -364,28 +393,8 @@ namespace UnityDataMiner
                     Log.Information("[{Version}] Extracting mono libraries", Version);
                     using (var stopwatch = new AutoStopwatch())
                     {
-                        // TODO: Clean up this massive mess
-                        var monoPath = (Version.IsMonolithic(), isLegacyDownload) switch
-                        {
-                            (true, true) when Version.Major == 4 && Version.Minor >= 5 => "Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment/Data/Managed",
-                            (true, true) => "Data/PlaybackEngines/windows64standaloneplayer/Managed",
-                            (true, false) => "Editor/Data/PlaybackEngines/windowsstandalonesupport/Variations/win64_nondevelopment_mono/Data/Managed",
-                            (false, true) => throw new Exception("Release can't be both legacy and modular at the same time"),
-                            (false, false) when HasLinuxEditor => $"Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64{(Version >= new UnityVersion(2021, 2) ? "_player" : "_withgfx")}_nondevelopment_mono/Data/Managed",
-                            (false, false) when !HasLinuxEditor && HasModularPlayer => $"./Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_nondevelopment_mono/Data/Managed",
-                            (false, false) => "./Variations/win64_nondevelopment_mono/Data/Managed",
-                        };
-
-                        await ExtractAsync(monoArchivePath, managedDirectory, new[] { $"{monoPath}/*.dll" }, cancellationToken);
-
-                        if (!Directory.Exists(managedDirectory) || Directory.GetFiles(managedDirectory, "*.dll").Length <= 0)
-                        {
-                            throw new Exception("Managed directory is empty");
-                        }
-
-                        File.Delete(ZipFilePath);
+                        await ExtractManagedDir();
                         ZipFile.CreateFromDirectory(managedDirectory, ZipFilePath);
-
                         Log.Information("[{Version}] Extracted mono libraries in {Time}", Version, stopwatch.Elapsed);
                     }
                 }
@@ -419,7 +428,12 @@ namespace UnityDataMiner
                 if (!File.Exists(NuGetPackagePath))
                 {
                     Log.Information("[{Version}] Creating NuGet package for mono libraries", Version);
-                    CreateNuGetPackage(managedDirectory);
+                    using (var stopwatch = new AutoStopwatch())
+                    {
+                        await ExtractManagedDir();
+                        CreateNuGetPackage(managedDirectory);
+                        Log.Information("[{Version}] Created NuGet package for mono libraries in {Time}", Version, stopwatch.Elapsed);
+                    }
                 }
             }
             finally
@@ -490,7 +504,10 @@ namespace UnityDataMiner
         private void CreateNuGetPackage(string pkgDir)
         {
             foreach (var file in Directory.EnumerateFiles(pkgDir, "*.dll"))
+            {
+                Log.Information("Publicising {file}", file);
                 AssemblyPublicizer.Publicize(file, file, new AssemblyPublicizerOptions { Strip = true });
+            }
 
             var deps = new[] { "net35", "net45", "netstandard2.0" };
 

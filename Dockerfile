@@ -13,4 +13,5 @@ FROM run
 COPY --from=build /src/bin/Release/net6.0/publish /app
 VOLUME [ "/data" ]
 ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/app/runtimes/alpine.3.9-x64/native"
+RUN git config --global --add safe.directory /data
 CMD [ "dotnet", "UnityDataMiner.dll", "--repository", "/data" ]
