@@ -1,9 +1,11 @@
-﻿using System.CommandLine.Builder;
+﻿using System;
+using System.CommandLine.Builder;
 using System.CommandLine.Hosting;
 using System.CommandLine.Parsing;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Polly;
 using Serilog;
 using Tommy.Extensions.Configuration;
 
@@ -36,6 +38,11 @@ namespace UnityDataMiner
                             .ConfigureServices(services =>
                             {
                                 services.AddOptions<MinerOptions>().BindConfiguration("MinerOptions");
+
+                                services.AddHttpClient("unity", client =>
+                                {
+                                    client.BaseAddress = new Uri("https://unity3d.com/");
+                                }).AddTransientHttpErrorPolicy(policy => policy.WaitAndRetryAsync(5, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
                             })
                             .UseCommandHandler<MineCommand, MineCommand.Handler>()
                             .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration

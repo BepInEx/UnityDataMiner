@@ -34,14 +34,16 @@ public class MineCommand : RootCommand
     {
         private readonly ILogger<Handler> _logger;
         private readonly MinerOptions _minerOptions;
+        private readonly IHttpClientFactory _clientFactory;
 
         public string? Version { get; init; }
         public DirectoryInfo Repository { get; init; }
 
-        public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions)
+        public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions, IHttpClientFactory clientFactory)
         {
             _logger = logger;
             _minerOptions = minerOptions.Value;
+            _clientFactory = clientFactory;
         }
 
         public async Task<int> InvokeAsync(InvocationContext context)
@@ -128,8 +130,8 @@ public class MineCommand : RootCommand
         private async Task<List<UnityBuild>> FetchStableUnityVersionsAsync(string repositoryPath)
         {
             var document = new HtmlDocument();
-            using var httpClient = new HttpClient();
-            await using var stream = await httpClient.GetStreamAsync("https://unity3d.com/get-unity/download/archive");
+            var httpClient = _clientFactory.CreateClient("unity");
+            await using var stream = await httpClient.GetStreamAsync("get-unity/download/archive");
             document.Load(stream);
 
             var unityVersions = new List<UnityBuild>();
@@ -182,8 +184,8 @@ public class MineCommand : RootCommand
 
         private async Task<List<UnityBuild>> FetchBetaUnityVersionsAsync(string repositoryPath)
         {
-            using var httpClient = new HttpClient();
-            using var xmlReader = XmlReader.Create(await httpClient.GetStreamAsync("https://unity3d.com/unity/beta/latest.xml"));
+            var httpClient = _clientFactory.CreateClient("unity");
+            using var xmlReader = XmlReader.Create(await httpClient.GetStreamAsync("unity/beta/latest.xml"));
             var feedReader = new RssFeedReader(xmlReader);
 
             var unityVersions = new List<UnityBuild>();
