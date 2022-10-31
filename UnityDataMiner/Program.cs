@@ -50,7 +50,7 @@ namespace UnityDataMiner
             }
             finally
             {
-                Log.CloseAndFlush();
+                await Log.CloseAndFlushAsync();
             }
         }
     }
