@@ -196,9 +196,14 @@ public class MineCommand : RootCommand
                 {
                     var item = await feedReader.ReadItem();
 
+                    // TODO: Do we still need Release prefix? Seems like it's not present anymore
                     if (item.Title.StartsWith("Release "))
                     {
                         unityVersions.Add(new UnityBuild(repositoryPath, item.Id, item.Title["Release ".Length..]));
+                    }
+                    else if (UnityVersionUtils.TryParse(item.Title, out _))
+                    {
+                        unityVersions.Add(new UnityBuild(repositoryPath, item.Id, item.Title));
                     }
                 }
             }
