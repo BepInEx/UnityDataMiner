@@ -162,19 +162,18 @@ namespace UnityDataMiner
                 return;
             }
 
-            Directory.CreateDirectory(InfoCacheDir);
-
             async Task<UnityBuildInfo?> FetchVariation(string variation)
             {
+                var variationUrl = BaseDownloadUrl + $"unity-{Version}-{variation}.ini";
                 string variationIni;
                 try
                 {
-                    variationIni =
-                        await _httpClient.GetStringAsync(BaseDownloadUrl + $"unity-{Version}-{variation}.ini",
-                            cancellationToken);
+                    variationIni = await _httpClient.GetStringAsync(variationUrl, cancellationToken);
                 }
                 catch (HttpRequestException hre) when (hre.StatusCode == HttpStatusCode.Forbidden)
                 {
+                    Log.Warning("Could not fetch {Variation} info for {Version} from {Url}. Got 'Access forbidden'",
+                        variation, Version, variationUrl);
                     return null;
                 }
 
@@ -185,6 +184,7 @@ namespace UnityDataMiner
                         $"Build info version is invalid (expected {Version}, got {info.Unity.Version})");
                 }
 
+                Directory.CreateDirectory(InfoCacheDir);
                 await File.WriteAllTextAsync(Path.Combine(InfoCacheDir, $"{variation}.ini"), variationIni,
                     cancellationToken);
                 return info;
