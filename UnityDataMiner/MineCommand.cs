@@ -186,7 +186,7 @@ public class MineCommand : RootCommand
         {
             var httpClient = _clientFactory.CreateClient("unity");
             using var xmlReader = XmlReader.Create(await httpClient.GetStreamAsync("unity/beta/latest.xml"));
-            var feedReader = new RssFeedReader(xmlReader);
+            var feedReader = new RssFeedReader(xmlReader, new SafeRssParser(_logger));
 
             var unityVersions = new List<UnityBuild>();
 
