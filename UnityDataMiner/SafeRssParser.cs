@@ -17,13 +17,16 @@ internal class SafeRssParser : RssParser
         _logger = logger;
     }
 
-    // Right now this is mainly for DateTimes, since Unity feed doesn't use proper RFC3339 format.
-    // We don't use dates so right now we just ignore them.
-    // TODO: Parse date properly even if doesn't conform to RFC3339.
     public override bool TryParseValue<T>(string value, out T result)
     {
         try
         {
+            if (typeof(T) == typeof(DateTimeOffset))
+            {
+                result = (T)(object)DateTimeOffset.Parse(value);
+                return true;
+            }
+            
             return base.TryParseValue(value, out result);
         }
         catch (Exception e)

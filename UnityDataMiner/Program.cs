@@ -41,7 +41,7 @@ namespace UnityDataMiner
 
                                 services.AddHttpClient("unity", client =>
                                 {
-                                    client.BaseAddress = new Uri("https://unity3d.com/");
+                                    client.BaseAddress = new Uri("https://unity.com/");
                                 }).AddTransientHttpErrorPolicy(policy => policy.WaitAndRetryAsync(5, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
                             })
                             .UseCommandHandler<MineCommand, MineCommand.Handler>()

@@ -6,7 +6,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
 using AssetRipper.VersionUtilities;
@@ -50,7 +49,7 @@ public class MineCommand : RootCommand
         {
             await SevenZip.EnsureInstalled();
             await EuUnstrip.EnsureInstalled();
-            
+
             var token = context.GetCancellationToken();
 
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "libraries"));
@@ -120,21 +119,21 @@ public class MineCommand : RootCommand
 
         private async Task<List<UnityBuild>> FetchUnityVersionsAsync(string repositoryPath)
         {
-            var unityVersions = new List<UnityBuild>();
-            unityVersions.AddRange(await FetchStableUnityVersionsAsync(repositoryPath));
-            unityVersions.AddRange(await FetchBetaUnityVersionsAsync(repositoryPath));
+            var unityVersions = new Dictionary<UnityVersion, UnityBuild>();
+            await FetchStableUnityVersionsAsync(repositoryPath, unityVersions);
+            await FetchUnityVersionsFromRssAsync(repositoryPath, unityVersions, "releases/editor/releases.xml");
+            await FetchUnityVersionsFromRssAsync(repositoryPath, unityVersions, "releases/editor/beta/latest.xml");
+            await FetchUnityVersionsFromRssAsync(repositoryPath, unityVersions, "releases/editor/lts-releases.xml");
             await FillMissingUnityVersionsAsync(repositoryPath, unityVersions);
-            return unityVersions;
+            return unityVersions.Values.ToList();
         }
 
-        private async Task<List<UnityBuild>> FetchStableUnityVersionsAsync(string repositoryPath)
+        private async Task FetchStableUnityVersionsAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions)
         {
             var document = new HtmlDocument();
             var httpClient = _clientFactory.CreateClient("unity");
-            await using var stream = await httpClient.GetStreamAsync("get-unity/download/archive");
+            await using var stream = await httpClient.GetStreamAsync("releases/editor/archive");
             document.Load(stream);
-
-            var unityVersions = new List<UnityBuild>();
 
             foreach (var link in document.DocumentNode.Descendants("a"))
             {
@@ -164,7 +163,8 @@ public class MineCommand : RootCommand
                         throw new Exception("Invalid download link for " + href);
                     }
 
-                    unityVersions.Add(new UnityBuild(repositoryPath, split[2], split[4][prefix.Length..^exe.Length]));
+                    var unityVersion = UnityVersion.Parse(split[4][prefix.Length..^exe.Length]);
+                    unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, split[2], unityVersion));
                 }
                 else if (innerText == "Unity Editor")
                 {
@@ -172,23 +172,22 @@ public class MineCommand : RootCommand
 
                     if (split.Length == 3 && split[2].StartsWith(prefix))
                     {
-                        unityVersions.Add(new UnityBuild(repositoryPath, null, split[2][prefix.Length..^exe.Length]));
+                        var unityVersion = UnityVersion.Parse(split[2][prefix.Length..^exe.Length]);
+                        unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, null, unityVersion));
                     }
                 }
             }
 
             _logger.LogInformation("Found {Count} stable unity versions", unityVersions.Count);
-
-            return unityVersions;
         }
 
-        private async Task<List<UnityBuild>> FetchBetaUnityVersionsAsync(string repositoryPath)
+        private async Task FetchUnityVersionsFromRssAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions, string xmlPath)
         {
             var httpClient = _clientFactory.CreateClient("unity");
-            using var xmlReader = XmlReader.Create(await httpClient.GetStreamAsync("unity/beta/latest.xml"));
+            using var xmlReader = XmlReader.Create(await httpClient.GetStreamAsync(xmlPath));
             var feedReader = new RssFeedReader(xmlReader, new SafeRssParser(_logger));
 
-            var unityVersions = new List<UnityBuild>();
+            var count = 0;
 
             while (await feedReader.Read())
             {
@@ -199,43 +198,52 @@ public class MineCommand : RootCommand
                     // TODO: Do we still need Release prefix? Seems like it's not present anymore
                     if (item.Title.StartsWith("Release "))
                     {
-                        unityVersions.Add(new UnityBuild(repositoryPath, item.Id, item.Title["Release ".Length..]));
+                        var unityVersion = UnityVersion.Parse(item.Title["Release ".Length..]);
+                        if (!unityVersions.ContainsKey(unityVersion))
+                        {
+                            unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, item.Id, unityVersion));
+                            count++;
+                        }
                     }
-                    else if (UnityVersionUtils.TryParse(item.Title, out _))
+                    else if (UnityVersionUtils.TryParse(item.Title, out var unityVersion))
                     {
-                        unityVersions.Add(new UnityBuild(repositoryPath, item.Id, item.Title));
+                        if (!unityVersions.ContainsKey(unityVersion))
+                        {
+                            unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, item.Id, unityVersion));
+                            count++;
+                        }
                     }
                 }
             }
 
-            _logger.LogInformation("Found {Count} beta unity versions", unityVersions.Count);
-
-            return unityVersions;
+            _logger.LogInformation("Found {Count} new unity versions in {XmlPath}", count, xmlPath);
         }
 
-        private async Task FillMissingUnityVersionsAsync(string repositoryPath, List<UnityBuild> unityVersions)
+        private async Task FillMissingUnityVersionsAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions)
         {
             var versionsCachePath = Path.Combine(repositoryPath, "versions");
             if (!Directory.Exists(versionsCachePath)) return;
 
-            var filledUnityVersions = new List<UnityBuild>();
+            var count = 0;
 
             await Parallel.ForEachAsync(Directory.GetDirectories(versionsCachePath), async (versionCachePath, token) =>
             {
                 var unityBuildInfo = UnityBuildInfo.Parse(await File.ReadAllTextAsync(Path.Combine(versionCachePath, "win.ini"), token));
                 if (unityBuildInfo.Unity.Title == "Unity 5") return;
 
-                var rawUnityVersion = unityBuildInfo.Unity.Title.Replace("Unity ", "");
-                var unityVersion = UnityVersion.Parse(rawUnityVersion);
+                var unityVersion = UnityVersion.Parse(unityBuildInfo.Unity.Title.Replace("Unity ", ""));
 
-                if (unityVersions.All(x => x.Version != unityVersion))
+                if (!unityVersions.ContainsKey(unityVersion))
                 {
-                    filledUnityVersions.Add(new UnityBuild(repositoryPath, Path.GetFileName(versionCachePath), rawUnityVersion));
+                    lock (unityVersions)
+                    {
+                        unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, Path.GetFileName(versionCachePath), unityVersion));
+                        count++;
+                    }
                 }
             });
 
-            unityVersions.AddRange(filledUnityVersions);
-            _logger.LogInformation("Filled {Count} unity versions", filledUnityVersions.Count);
+            _logger.LogInformation("Filled {Count} unity versions", count);
         }
 
         private void UpdateGitRepository(string repositoryPath, List<UnityBuild> unityVersions)

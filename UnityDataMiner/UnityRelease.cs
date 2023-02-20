@@ -54,10 +54,10 @@ namespace UnityDataMiner
         public UnityBuildInfo? LinuxInfo { get; private set; }
         public UnityBuildInfo? MacOsInfo { get; private set; }
 
-        public UnityBuild(string repositoryPath, string? id, string version)
+        public UnityBuild(string repositoryPath, string? id, UnityVersion version)
         {
             Id = id;
-            Version = UnityVersion.Parse(version);
+            Version = version;
 
             if (Version.Major >= 5 && Id == null)
             {
