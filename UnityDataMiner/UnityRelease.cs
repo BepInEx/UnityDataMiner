@@ -87,13 +87,21 @@ namespace UnityDataMiner
             LibIl2CppSourceZipPath = Path.Combine(repositoryPath, "libil2cpp-source", zipName);
             NuGetPackagePath = Path.Combine(repositoryPath, "packages", $"{NuGetVersion}.nupkg");
             InfoCacheDir = Path.Combine(repositoryPath, "versions", $"{id}");
+
             WindowsInfo = ReadInfo("win");
-            LinuxInfo = ReadInfo("linux");
+
+            if (Version >= _firstLinuxVersion)
+            {
+                LinuxInfo = ReadInfo("linux");
+            }
+
             MacOsInfo = ReadInfo("osx");
         }
 
         private static readonly HttpClient _httpClient = new();
         private static readonly SemaphoreSlim _downloadLock = new(2, 2);
+
+        private static readonly UnityVersion _firstLinuxVersion = new(2018, 1, 5);
 
         // First modular version where own native player is included in the default installer
         private static readonly UnityVersion _firstMergedModularVersion = new(5, 4);
@@ -166,6 +174,7 @@ namespace UnityDataMiner
                 string variationIni;
                 try
                 {
+                    Log.Information("Fetching {Variation} info for {Version} from {Url}", variation, Version, variationUrl);
                     variationIni = await _httpClient.GetStringAsync(variationUrl, cancellationToken);
                 }
                 catch (HttpRequestException hre) when (hre.StatusCode == HttpStatusCode.Forbidden)
@@ -310,7 +319,7 @@ namespace UnityDataMiner
                     const string symbols = "Variations/il2cpp/Release/Symbols";
 
                     await ExtractAsync(androidArchivePath!, archiveDirectory,
-                        new[] {$"./{libs}/*/libunity.so", $"./{symbols}/*/libunity.sym.so"}, cancellationToken, false);
+                        new[] { $"./{libs}/*/libunity.so", $"./{symbols}/*/libunity.sym.so" }, cancellationToken, false);
 
                     Directory.CreateDirectory(androidDirectory);
 
@@ -367,7 +376,7 @@ namespace UnityDataMiner
                             false => "Editor/Data/il2cpp/libil2cpp",
                         };
                         await ExtractAsync(libil2cppSourceArchivePath, libil2cppSourceDirectory,
-                            new[] {$"{libil2cppSourcePath}/**"}, cancellationToken, false);
+                            new[] { $"{libil2cppSourcePath}/**" }, cancellationToken, false);
                         var zipDir = Path.Combine(libil2cppSourceDirectory, libil2cppSourcePath);
                         if (!Directory.Exists(zipDir) || Directory.GetFiles(zipDir).Length <= 0)
                         {
@@ -409,7 +418,7 @@ namespace UnityDataMiner
                         (false, false) => "./Variations/win64_nondevelopment_mono/Data/Managed",
                     };
 
-                    await ExtractAsync(monoArchivePath, managedDirectory, new[] {$"{monoPath}/*.dll"},
+                    await ExtractAsync(monoArchivePath, managedDirectory, new[] { $"{monoPath}/*.dll" },
                         cancellationToken);
 
                     if (!Exists())
@@ -511,7 +520,7 @@ namespace UnityDataMiner
                 case ".pkg":
                 {
                     const string payloadName = "Payload~";
-                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] {payloadName}, true,
+                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] { payloadName }, true,
                         cancellationToken);
                     await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory,
                         filter, flat, cancellationToken);
@@ -529,7 +538,7 @@ namespace UnityDataMiner
                 case ".xz":
                 {
                     string payloadName = Path.GetFileNameWithoutExtension(archivePath);
-                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] {payloadName}, true,
+                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] { payloadName }, true,
                         cancellationToken);
                     await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory,
                         filter, flat, cancellationToken);
@@ -545,14 +554,14 @@ namespace UnityDataMiner
         private void CreateNuGetPackage(string pkgDir)
         {
             foreach (var file in Directory.EnumerateFiles(pkgDir, "*.dll"))
-                AssemblyPublicizer.Publicize(file, file, new AssemblyPublicizerOptions {Strip = true});
+                AssemblyPublicizer.Publicize(file, file, new AssemblyPublicizerOptions { Strip = true });
 
-            var deps = new[] {"net35", "net45", "netstandard2.0"};
+            var deps = new[] { "net35", "net45", "netstandard2.0" };
 
             var meta = new ManifestMetadata
             {
                 Id = "UnityEngine.Modules",
-                Authors = new[] {"Unity"},
+                Authors = new[] { "Unity" },
                 Version = NuGetVersion,
                 Description = "UnityEngine modules",
                 DevelopmentDependency = true,
@@ -576,7 +585,7 @@ namespace UnityDataMiner
             Log.Information("[{Version}] Pushing NuGet package", Version);
             var repo = Repository.Factory.GetCoreV3(sourceUrl);
             var updateResource = await repo.GetResourceAsync<PackageUpdateResource>();
-            await updateResource.Push(new[] {NuGetPackagePath},
+            await updateResource.Push(new[] { NuGetPackagePath },
                 null,
                 2 * 60,
                 false,
