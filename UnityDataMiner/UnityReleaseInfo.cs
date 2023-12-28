@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
-using AssetRipper.VersionUtilities;
+using AssetRipper.Primitives;
 
 namespace UnityDataMiner;
 

@@ -8,7 +8,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using AssetRipper.VersionUtilities;
+using AssetRipper.Primitives;
 using BepInEx.AssemblyPublicizer;
 using NuGet.Common;
 using NuGet.Frameworks;

@@ -1,4 +1,4 @@
-using AssetRipper.VersionUtilities;
+using AssetRipper.Primitives;
 
 namespace UnityDataMiner;
 

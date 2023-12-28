@@ -8,7 +8,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Xml;
-using AssetRipper.VersionUtilities;
+using AssetRipper.Primitives;
 using HtmlAgilityPack;
 using LibGit2Sharp;
 using Microsoft.Extensions.Logging;
