@@ -95,8 +95,6 @@ namespace UnityDataMiner
         private static readonly HttpClient _httpClient = new();
         private static readonly SemaphoreSlim _downloadLock = new(2, 2);
 
-        private static readonly UnityVersion _firstLinuxVersion = new(2018, 1, 5);
-
         // First modular version where own native player is included in the default installer
         private static readonly UnityVersion _firstMergedModularVersion = new(5, 4);
         private static readonly UnityVersion _firstLibIl2CppVersion = new(5, 0, 2);
@@ -121,7 +119,7 @@ namespace UnityDataMiner
             "System.Xml.Linq",
         };
 
-        private bool HasLinuxEditor => LinuxInfo is not null || Version >= _firstLinuxVersion;
+        private bool HasLinuxEditor => LinuxInfo is not null;
         private bool HasModularPlayer => Version >= _firstMergedModularVersion;
         private bool IsMonolithic => Version.IsMonolithic();
         private bool HasLibIl2Cpp => Version >= _firstLibIl2CppVersion;

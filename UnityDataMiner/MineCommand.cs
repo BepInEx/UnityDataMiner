@@ -6,20 +6,20 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using System.Xml;
 using AssetRipper.Primitives;
-using HtmlAgilityPack;
 using LibGit2Sharp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.SyndicationFeed;
-using Microsoft.SyndicationFeed.Rss;
 
 namespace UnityDataMiner;
 
-public class MineCommand : RootCommand
+public partial class MineCommand : RootCommand
 {
+    [GeneratedRegex(@"unityhub:\/\/(?<version>[\d.\w]+)\/(?<id>[0-9a-f]+)")]
+    private static partial Regex UnityHubLinkRegex();
+
     public MineCommand()
     {
         Add(new Argument<string?>("version")
@@ -120,103 +120,33 @@ public class MineCommand : RootCommand
         private async Task<List<UnityBuild>> FetchUnityVersionsAsync(string repositoryPath)
         {
             var unityVersions = new Dictionary<UnityVersion, UnityBuild>();
-            await FetchStableUnityVersionsAsync(repositoryPath, unityVersions);
-            await FetchUnityVersionsFromRssAsync(repositoryPath, unityVersions, "releases/editor/releases.xml");
-            await FetchUnityVersionsFromRssAsync(repositoryPath, unityVersions, "releases/editor/beta/latest.xml");
-            await FetchUnityVersionsFromRssAsync(repositoryPath, unityVersions, "releases/editor/lts-releases.xml");
+            await FetchUnityVersionsAsync(repositoryPath, unityVersions, "releases/editor/archive");
+            await FetchUnityVersionsAsync(repositoryPath, unityVersions, "releases/editor/releases.xml");
+            await FetchUnityVersionsAsync(repositoryPath, unityVersions, "releases/editor/beta/latest.xml");
+            await FetchUnityVersionsAsync(repositoryPath, unityVersions, "releases/editor/lts-releases.xml");
             await FillMissingUnityVersionsAsync(repositoryPath, unityVersions);
             return unityVersions.Values.ToList();
         }
 
-        private async Task FetchStableUnityVersionsAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions)
-        {
-            var document = new HtmlDocument();
-            var httpClient = _clientFactory.CreateClient("unity");
-            await using var stream = await httpClient.GetStreamAsync("releases/editor/archive");
-            document.Load(stream);
-
-            foreach (var link in document.DocumentNode.Descendants("a"))
-            {
-                var href = link.GetAttributeValue("href", null);
-                if (href == null)
-                    continue;
-
-                if (!Uri.TryCreate(href, UriKind.Absolute, out var uri))
-                    continue;
-                var split = uri.AbsolutePath.Split("/");
-
-                if (uri.Host != "download.unity3d.com" || split[1] != "download_unity")
-                {
-                    continue;
-                }
-
-                var innerText = link.InnerText.Trim();
-
-                const string exe = ".exe";
-
-                if (innerText == "Unity Editor 64-bit")
-                {
-                    const string prefix = "UnitySetup64-";
-
-                    if (split[3] != "Windows64EditorInstaller" || !split[4].StartsWith(prefix))
-                    {
-                        throw new Exception("Invalid download link for " + href);
-                    }
-
-                    var unityVersion = UnityVersion.Parse(split[4][prefix.Length..^exe.Length]);
-                    unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, split[2], unityVersion));
-                }
-                else if (innerText == "Unity Editor")
-                {
-                    const string prefix = "UnitySetup-";
-
-                    if (split.Length == 3 && split[2].StartsWith(prefix))
-                    {
-                        var unityVersion = UnityVersion.Parse(split[2][prefix.Length..^exe.Length]);
-                        unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, null, unityVersion));
-                    }
-                }
-            }
-
-            _logger.LogInformation("Found {Count} stable unity versions", unityVersions.Count);
-        }
-
-        private async Task FetchUnityVersionsFromRssAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions, string xmlPath)
+        private async Task FetchUnityVersionsAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions, string path)
         {
             var httpClient = _clientFactory.CreateClient("unity");
-            using var xmlReader = XmlReader.Create(await httpClient.GetStreamAsync(xmlPath));
-            var feedReader = new RssFeedReader(xmlReader, new SafeRssParser(_logger));
+            var text = await httpClient.GetStringAsync(path);
 
             var count = 0;
 
-            while (await feedReader.Read())
+            foreach (Match match in UnityHubLinkRegex().Matches(text))
             {
-                if (feedReader.ElementType == SyndicationElementType.Item)
-                {
-                    var item = await feedReader.ReadItem();
+                var unityVersion = UnityVersion.Parse(match.Groups["version"].Value);
 
-                    // TODO: Do we still need Release prefix? Seems like it's not present anymore
-                    if (item.Title.StartsWith("Release "))
-                    {
-                        var unityVersion = UnityVersion.Parse(item.Title["Release ".Length..]);
-                        if (!unityVersions.ContainsKey(unityVersion))
-                        {
-                            unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, item.Id, unityVersion));
-                            count++;
-                        }
-                    }
-                    else if (UnityVersionUtils.TryParse(item.Title, out var unityVersion))
-                    {
-                        if (!unityVersions.ContainsKey(unityVersion))
-                        {
-                            unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, item.Id, unityVersion));
-                            count++;
-                        }
-                    }
+                if (!unityVersions.ContainsKey(unityVersion))
+                {
+                    unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, match.Groups["id"].Value, unityVersion));
+                    count++;
                 }
             }
 
-            _logger.LogInformation("Found {Count} new unity versions in {XmlPath}", count, xmlPath);
+            _logger.LogInformation("Found {Count} new unity versions in {Path}", count, path);
         }
 
         private async Task FillMissingUnityVersionsAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions)
