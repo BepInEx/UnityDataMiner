@@ -55,6 +55,7 @@ public partial class MineCommand : RootCommand
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "libraries"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "packages"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "corlibs"));
+            Directory.CreateDirectory(Path.Combine(Repository.FullName, "mono"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "libil2cpp-source"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "android"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "versions"));

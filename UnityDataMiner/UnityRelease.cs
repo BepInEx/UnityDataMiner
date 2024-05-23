@@ -33,6 +33,8 @@ namespace UnityDataMiner
 
         public string ZipFilePath { get; }
 
+        public string MonoPath { get; }
+
         public string AndroidPath { get; }
 
         public string NuGetPackagePath { get; }
@@ -44,9 +46,9 @@ namespace UnityDataMiner
         public string LibIl2CppSourceZipPath { get; }
 
         public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) ||
-                                   !File.Exists(CorlibZipPath) ||
+                                   !File.Exists(CorlibZipPath) || !File.Exists(MonoPath) ||
                                    (HasLibIl2Cpp && !File.Exists(LibIl2CppSourceZipPath)) ||
-                                   !Version.IsMonolithic() && !Directory.Exists(AndroidPath);
+                                   (!Version.IsMonolithic() && !Directory.Exists(AndroidPath));
 
         public string BaseDownloadUrl => Version.GetDownloadUrl() + (Id == null ? string.Empty : $"{Id}/");
 
@@ -82,6 +84,7 @@ namespace UnityDataMiner
             var versionName = Version.Type == UnityVersionType.Final ? ShortVersion : Version.ToString();
             var zipName = $"{versionName}.zip";
             ZipFilePath = Path.Combine(repositoryPath, "libraries", zipName);
+            MonoPath = Path.Combine(repositoryPath, "mono", versionName);
             AndroidPath = Path.Combine(repositoryPath, "android", versionName);
             CorlibZipPath = Path.Combine(repositoryPath, "corlibs", zipName);
             LibIl2CppSourceZipPath = Path.Combine(repositoryPath, "libil2cpp-source", zipName);
@@ -226,6 +229,7 @@ namespace UnityDataMiner
             return $"{editorDownloadPrefix}{ShortVersion}.exe";
         }
 
+
         public async Task MineAsync(CancellationToken cancellationToken)
         {
             var isLegacyDownload = Id == null || Version.Major < 5;
@@ -266,47 +270,46 @@ namespace UnityDataMiner
                 : Path.Combine(tmpDirectory, Path.GetFileName(androidDownloadUrl));
             var libil2cppSourceArchivePath = Path.Combine(tmpDirectory, Path.GetFileName(downloadFile));
 
-            try
+            var assetCollection = new DownloadableAssetCollection();
+
+            // main downloads
+            monoArchivePath = assetCollection.AddAsset(monoDownloadUrl, monoArchivePath);
+            corlibArchivePath = !string.IsNullOrEmpty(corlibDownloadUrl) 
+                ? assetCollection.AddAsset(corlibDownloadUrl, corlibArchivePath)
+                : monoArchivePath;
+            androidArchivePath = androidDownloadUrl is not null
+                ? assetCollection.AddAsset(androidDownloadUrl, androidArchivePath!)
+                : androidArchivePath;
+
+            // extra Mono pack downloads
+            // Note: we want to avoid Windows downloads, because 7z can't extract some of those.
+            // We also want to prefer downloading specific platform support bundles because those are significantly smaller.
+            var monoWinBuild = LinuxInfo?.WindowsMono ?? MacOsInfo?.WindowsMono;
+            var monoLinuxBuild = MacOsInfo?.LinuxMono ?? WindowsInfo?.LinuxMono;
+            var monoMacBuild = LinuxInfo?.MacMono ?? WindowsInfo?.MacMono;
+
+            string? AddMonoBuildDownload(UnityBuildInfo.Module? module, string osName)
             {
-                while (true)
+                if (module is null)
                 {
-                    try
-                    {
-                        await _downloadLock.WaitAsync(cancellationToken);
-                        try
-                        {
-                            await DownloadAsync(monoDownloadUrl, monoArchivePath, cancellationToken);
-
-                            if (corlibDownloadUrl is not "")
-                            {
-                                await DownloadAsync(corlibDownloadUrl, corlibArchivePath, cancellationToken);
-                            }
-
-                            if (androidDownloadUrl != null)
-                            {
-                                await DownloadAsync(androidDownloadUrl, androidArchivePath!, cancellationToken);
-                            }
-                        }
-                        finally
-                        {
-                            if (!cancellationToken.IsCancellationRequested)
-                            {
-                                _downloadLock.Release();
-                            }
-                        }
-
-                        break;
-                    }
-                    catch (IOException e) when (e.InnerException is SocketException
-                                                {
-                                                    SocketErrorCode: SocketError.ConnectionReset
-                                                })
-                    {
-                        Log.Warning("Failed to download {Version}, waiting 5 seconds before retrying...", Version);
-                        await Task.Delay(5000, cancellationToken);
-                    }
+                    // TODO: try to fall back to the main pack if unavailable?
+                    Log.Warning("[{Version}] Could not get URL for Mono pack for {OS}", Version, osName);
+                    return null;
                 }
 
+                return assetCollection.AddAsset(BaseDownloadUrl + module.Url,
+                    Path.Combine(tmpDirectory, $"{osName}-{Path.GetFileName(module.Url)}"));
+            }
+
+            var monoWinArchive = AddMonoBuildDownload(monoWinBuild, "windows");
+            var monoLinuxArchive = AddMonoBuildDownload(monoLinuxBuild, "linux");
+            var monoMacArchive = AddMonoBuildDownload(monoMacBuild, "macos");
+
+            try
+            {
+                await assetCollection.DownloadAssetsAsync(DownloadAsync, Version, _downloadLock, cancellationToken);
+
+                // process android
                 if (androidDownloadUrl != null && !Directory.Exists(AndroidPath))
                 {
                     Log.Information("[{Version}] Extracting android binaries", Version);
@@ -363,7 +366,8 @@ namespace UnityDataMiner
                     Log.Information("[{Version}] Extracted android binaries in {Time}", Version, stopwatch.Elapsed);
                 }
 
-                if (!File.Exists(ZipFilePath))
+                // process libil2cpp
+                if (!File.Exists(LibIl2CppSourceZipPath))
                 {
                     Log.Information("[{Version}] Extracting libil2cpp source code", Version);
                     using (var stopwatch = new AutoStopwatch())
@@ -427,6 +431,7 @@ namespace UnityDataMiner
                     }
                 }
 
+                // process unity libs
                 if (!File.Exists(ZipFilePath))
                 {
                     Log.Information("[{Version}] Extracting mono libraries", Version);
@@ -438,6 +443,7 @@ namespace UnityDataMiner
                     }
                 }
 
+                // process corlibs
                 if (!File.Exists(CorlibZipPath))
                 {
                     using (var stopwatch = new AutoStopwatch())
@@ -467,6 +473,7 @@ namespace UnityDataMiner
                     }
                 }
 
+                // generate nuget package
                 if (!File.Exists(NuGetPackagePath))
                 {
                     Log.Information("[{Version}] Creating NuGet package for mono libraries", Version);
@@ -477,6 +484,130 @@ namespace UnityDataMiner
                         Log.Information("[{Version}] Created NuGet package for mono libraries in {Time}", Version,
                             stopwatch.Elapsed);
                     }
+                }
+
+                // process Mono builds
+                if (!Directory.Exists(MonoPath))
+                {
+                    Log.Information("[{Version}] Packaging Mono binaries", Version);
+                    using var stopwatch = new AutoStopwatch();
+
+                    var monoBaseDir = Path.Combine(tmpDirectory, "mono");
+                    var winBaseDir = Path.Combine(monoBaseDir, "win");
+                    var linuxBaseDir = Path.Combine(monoBaseDir, "linux");
+                    var macBaseDir = Path.Combine(monoBaseDir, "mac");
+
+                    // first, Windows
+                    if (monoWinArchive is not null)
+                    {
+                        Log.Information("[{Version}] Processing Windows", Version);
+
+                        // extract all of the Mono variants
+                        await ExtractAsync(monoWinArchive, winBaseDir, 
+                            ["./Variations/*_player_nondevelopment_mono/Mono*/**"],
+                            cancellationToken, flat: false);
+
+                        // Windows is nice and easy, we just want to pack up all the subdirs of *_player_nondevelopment_mono
+                        // They contain fully self-contained Mono installs minus the corelib, which we extract above.
+                        // The actual executable binaries are in /EmbedRuntime
+                        foreach (var playerDir in Directory.EnumerateDirectories(Path.Combine(winBaseDir, "Variations")))
+                        {
+                            var arch = Path.GetFileName(playerDir).Replace("_player_nondevelopment_mono", "");
+                            if (!arch.Contains("win"))
+                            {
+                                arch = "win_" + arch;
+                            }
+
+                            foreach (var monoDir in Directory.EnumerateDirectories(playerDir))
+                            {
+                                var monoName = Path.GetFileName(monoDir);
+
+                                // rename EmbedRuntime to just runtime for consistency across platforms
+                                Directory.Move(Path.Combine(monoDir, "EmbedRuntime"), Path.Combine(monoDir, "runtime"));
+                                ZipFile.CreateFromDirectory(monoDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
+                            }
+                        }
+                    }
+
+                    // next, Linux
+                    if (monoLinuxArchive is not null)
+                    {
+                        Log.Information("[{Version}] Processing Linux", Version);
+
+                        await ExtractAsync(monoLinuxArchive, linuxBaseDir,
+                            ["./Variations/*_player_nondevelopment_mono/data/Mono*/**"],
+                            cancellationToken, flat: false);
+
+                        // Linux is mostly similar to Windows, except that the runtime binaries are in x86_64 instead of EmbedRuntime
+                        // Presumably, if non-x64 support is added, the runtime files would end up in folders named for the arch, but
+                        // Unity doesn't support any of those right now, so who knows.
+                        foreach (var playerDir in Directory.EnumerateDirectories(Path.Combine(winBaseDir, "Variations")))
+                        {
+                            var arch = Path.GetFileName(playerDir).Replace("_player_nondevelopment_mono", "");
+                            if (!arch.Contains("linux"))
+                            {
+                                arch = "linux_" + arch;
+                            }
+
+                            foreach (var monoDir in Directory.EnumerateDirectories(Path.Combine(playerDir, "Data")))
+                            {
+                                var monoName = Path.GetFileName(monoDir);
+
+                                // rename the runtime directory for consistency
+                                Directory.Move(Path.Combine(monoDir, "x86_64"), Path.Combine(monoDir, "runtime"));
+                                ZipFile.CreateFromDirectory(monoDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
+                            }
+                        }
+                    }
+                    
+                    // finally, MacOS
+                    if (monoMacArchive is not null)
+                    {
+                        Log.Information("[{Version}] Processing MacOS", Version);
+
+                        await ExtractAsync(monoMacArchive, macBaseDir,
+                            [
+                                "./Mono*/**", // this contains the configuration
+                                "./Variations/*_player_nondevelopment_mono/UnityPlayer.app/Contents/Frameworks/lib*" // this contains the actual runtime
+                                // note: we filter to the lib prefix to avoid extracting UnityPlayer.dylib
+                            ],
+                            cancellationToken, flat: false);
+
+                        // MacOS is the messiest. There's only one copy of the config files, but several of the runtime, in a very unusual structure.
+                        // We'll just have to cope though.
+                        foreach (var monoConfigDir in Directory.EnumerateDirectories(macBaseDir, "Mono*"))
+                        {
+                            var monoName = Path.GetFileName(monoConfigDir);
+                            var runtimeDir = Path.Combine(monoConfigDir, "runtime");
+
+                            foreach (var playerDir in Directory.EnumerateDirectories(Path.Combine(macBaseDir, "Variations")))
+                            {
+                                var arch = Path.GetFileName(playerDir).Replace("_player_nondevelopment_mono", "");
+                                if (!arch.Contains("macos"))
+                                {
+                                    arch = "macos_" + arch;
+                                }
+
+                                if (Directory.Exists(runtimeDir))
+                                {
+                                    Directory.Delete(runtimeDir);
+                                }
+
+                                Directory.Move(Path.Combine(playerDir, "UnityPlayer.app", "Contents", "Frameworks"), runtimeDir);
+                                ZipFile.CreateFromDirectory(monoConfigDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
+                            }
+                        }
+                    }
+
+                    // we've created all of the zip files, move them into place
+                    Directory.CreateDirectory(MonoPath);
+                    foreach (var zip in Directory.EnumerateFiles(monoBaseDir, "*.zip"))
+                    {
+                        File.Move(zip, Path.Combine(MonoPath, Path.GetFileName(zip)));
+                    }
+
+                    Log.Information("[{Version}] Mono binaries packages in {Time}", Version,
+                        stopwatch.Elapsed);
                 }
             }
             finally
@@ -520,7 +651,7 @@ namespace UnityDataMiner
                 case ".pkg":
                 {
                     const string payloadName = "Payload~";
-                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] { payloadName }, true,
+                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
                         cancellationToken);
                     await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory,
                         filter, flat, cancellationToken);
@@ -538,7 +669,7 @@ namespace UnityDataMiner
                 case ".xz":
                 {
                     string payloadName = Path.GetFileNameWithoutExtension(archivePath);
-                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] { payloadName }, true,
+                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
                         cancellationToken);
                     await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory,
                         filter, flat, cancellationToken);
