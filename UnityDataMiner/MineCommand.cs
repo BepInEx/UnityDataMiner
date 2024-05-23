@@ -22,9 +22,9 @@ public partial class MineCommand : RootCommand
 
     public MineCommand()
     {
-        Add(new Argument<string?>("version")
+        Add(new Argument<string[]?>("version")
         {
-            Arity = ArgumentArity.ZeroOrOne,
+            Arity = ArgumentArity.ZeroOrMore,
         });
         Add(new Option<DirectoryInfo>("--repository", () => new DirectoryInfo(Directory.GetCurrentDirectory())));
     }
@@ -35,7 +35,7 @@ public partial class MineCommand : RootCommand
         private readonly MinerOptions _minerOptions;
         private readonly IHttpClientFactory _clientFactory;
 
-        public string? Version { get; init; }
+        public string[]? Version { get; init; }
         public DirectoryInfo Repository { get; init; }
 
         public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions, IHttpClientFactory clientFactory)
@@ -77,9 +77,9 @@ public partial class MineCommand : RootCommand
                 }
             });
 
-            var toRun = string.IsNullOrEmpty(Version)
+            var toRun = Version is null
                 ? unityVersions.Where(unityVersion => unityVersion.IsRunNeeded).ToArray()
-                : new[] { unityVersions.Single(x => x.ShortVersion == Version) };
+                : unityVersions.Where(v => Version.Contains(v.ShortVersion)).ToArray();
 
             _logger.LogInformation("Mining {Count} unity versions", toRun.Length);
 
