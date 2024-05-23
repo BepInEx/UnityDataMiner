@@ -46,7 +46,7 @@ namespace UnityDataMiner
         public string LibIl2CppSourceZipPath { get; }
 
         public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) ||
-                                   !File.Exists(CorlibZipPath) || !File.Exists(MonoPath) ||
+                                   !File.Exists(CorlibZipPath) || !Directory.Exists(MonoPath) ||
                                    (HasLibIl2Cpp && !File.Exists(LibIl2CppSourceZipPath)) ||
                                    (!Version.IsMonolithic() && !Directory.Exists(AndroidPath));
 
