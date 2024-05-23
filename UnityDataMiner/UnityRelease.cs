@@ -523,7 +523,12 @@ namespace UnityDataMiner
                                 var monoName = Path.GetFileName(monoDir);
 
                                 // rename EmbedRuntime to just runtime for consistency across platforms
-                                Directory.Move(Path.Combine(monoDir, "EmbedRuntime"), Path.Combine(monoDir, "runtime"));
+                                var runtimeDir = Path.Combine(monoDir, "runtime");
+                                if (Directory.Exists(runtimeDir))
+                                {
+                                    Directory.Delete(runtimeDir, true);
+                                }
+                                Directory.Move(Path.Combine(monoDir, "EmbedRuntime"), runtimeDir);
                                 ZipFile.CreateFromDirectory(monoDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
                             }
                         }
@@ -535,13 +540,13 @@ namespace UnityDataMiner
                         Log.Information("[{Version}] Processing Linux", Version);
 
                         await ExtractAsync(monoLinuxArchive, linuxBaseDir,
-                            ["./Variations/*_player_nondevelopment_mono/data/Mono*/**"],
+                            ["./Variations/*_player_nondevelopment_mono/Data/Mono*/**"],
                             cancellationToken, flat: false);
 
                         // Linux is mostly similar to Windows, except that the runtime binaries are in x86_64 instead of EmbedRuntime
                         // Presumably, if non-x64 support is added, the runtime files would end up in folders named for the arch, but
                         // Unity doesn't support any of those right now, so who knows.
-                        foreach (var playerDir in Directory.EnumerateDirectories(Path.Combine(winBaseDir, "Variations")))
+                        foreach (var playerDir in Directory.EnumerateDirectories(Path.Combine(linuxBaseDir, "Variations")))
                         {
                             var arch = Path.GetFileName(playerDir).Replace("_player_nondevelopment_mono", "");
                             if (!arch.Contains("linux"))
@@ -554,7 +559,13 @@ namespace UnityDataMiner
                                 var monoName = Path.GetFileName(monoDir);
 
                                 // rename the runtime directory for consistency
-                                Directory.Move(Path.Combine(monoDir, "x86_64"), Path.Combine(monoDir, "runtime"));
+
+                                var runtimeDir = Path.Combine(monoDir, "runtime");
+                                if (Directory.Exists(runtimeDir))
+                                {
+                                    Directory.Delete(runtimeDir, true);
+                                }
+                                Directory.Move(Path.Combine(monoDir, "x86_64"), runtimeDir);
                                 ZipFile.CreateFromDirectory(monoDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
                             }
                         }
@@ -590,7 +601,7 @@ namespace UnityDataMiner
 
                                 if (Directory.Exists(runtimeDir))
                                 {
-                                    Directory.Delete(runtimeDir);
+                                    Directory.Delete(runtimeDir, true);
                                 }
 
                                 Directory.Move(Path.Combine(playerDir, "UnityPlayer.app", "Contents", "Frameworks"), runtimeDir);
@@ -606,7 +617,7 @@ namespace UnityDataMiner
                         File.Move(zip, Path.Combine(MonoPath, Path.GetFileName(zip)));
                     }
 
-                    Log.Information("[{Version}] Mono binaries packages in {Time}", Version,
+                    Log.Information("[{Version}] Mono binaries packaged in {Time}", Version,
                         stopwatch.Elapsed);
                 }
             }
