@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using AssetRipper.Primitives;
@@ -308,7 +310,7 @@ namespace UnityDataMiner
 
             try
             {
-                await assetCollection.DownloadAssetsAsync(DownloadAsync, Version, _downloadLock, cancellationToken);
+                await assetCollection.DownloadAssetsAsync(DownloadAsync, Version, null, cancellationToken);
 
                 // process android
                 if (androidDownloadUrl != null && !Directory.Exists(AndroidPath))
@@ -628,6 +630,139 @@ namespace UnityDataMiner
             }
         }
 
+        public Task ExecuteJobs(ImmutableArray<MinerJob> jobs, CancellationToken cancellationToken)
+        {
+            var plan = JobPlanner.Plan(jobs, this, cancellationToken);
+            if (plan is null) return Task.CompletedTask; // if we failed to find a plan for a problematic reason, it's already been logged
+            return ExecutePlan(plan, cancellationToken);
+        }
+
+        private async Task ExecutePlan(JobPlanner.JobPlan plan, CancellationToken cancellationToken)
+        {
+            var jobsToStart = plan.Jobs.ToBuilder();
+
+            var tmpDirectory = Path.Combine(Path.GetTempPath(), "UnityDataMiner", Version.ToString()); ;
+            Directory.CreateDirectory(tmpDirectory);
+
+            try
+            {
+                var targetPaths = new string[plan.Packages.Length];
+                var downloadTasks = new Task?[plan.Packages.Length];
+
+                for (var i = 0; i < plan.Packages.Length; i++)
+                {
+                    var package = plan.Packages[i];
+                    var targetName = Path.GetFileName(package.Url);
+                    var arcPath = Path.Combine(tmpDirectory, i + "-" + targetName);
+                    targetPaths[i] = arcPath;
+                    // start all download tasks simultaneously to try to fully saturate our allowed parallel downlads
+                    downloadTasks[i] = DownloadAsync(BaseDownloadUrl + package.Url, arcPath, cancellationToken);
+                }
+
+                var jobTasks = new List<Task>(jobsToStart.Count);
+                var downloadedPackages = new HashSet<int>(plan.Packages.Length);
+
+                // our main download processing loop
+                while (downloadTasks.Any(t => t is not null))
+                {
+                    var completed = await Task.WhenAny(downloadTasks.Where(t => t is not null)!);
+
+                    var i = Array.IndexOf(downloadTasks, completed);
+
+                    switch (completed.Status)
+                    {
+                        default:
+                        case TaskStatus.Created:
+                        case TaskStatus.WaitingForActivation:
+                        case TaskStatus.WaitingToRun:
+                        case TaskStatus.Running:
+                        case TaskStatus.WaitingForChildrenToComplete:
+                            // none of these are completion states, it should never happen
+                            continue;
+
+                        case TaskStatus.Canceled:
+                            // download was cancelled, which means that our own CT was set. Wait for everything, and (inevitably) bail.
+                            await Task.WhenAll(jobTasks.Concat(downloadTasks.Where(t => t is not null))!);
+                            break;
+
+                        case TaskStatus.Faulted:
+                            // task faulted; check the exception and maybe retry, otherwise do the same as when cancelled
+                            if (completed.Exception is {
+                                InnerExceptions: [ IOException {
+                                    InnerException: SocketException { SocketErrorCode: SocketError.ConnectionReset }
+                                }]
+                            })
+                            {
+                                // we want to retry
+                                static async Task RetryDownload(UnityBuild @this, string url, string packagePath, CancellationToken cancellationToken)
+                                {
+                                    Log.Warning("[{Version}] Failed to download {Url}, waiting 5 seconds before retrying...", @this.Version, url);
+                                    await Task.Delay(5000, cancellationToken);
+                                    await @this.DownloadAsync(@this.BaseDownloadUrl + url, packagePath, cancellationToken);
+                                }
+
+                                downloadTasks[i] = RetryDownload(this, plan.Packages[i].Url, targetPaths[i], cancellationToken);
+                            }
+                            else
+                            {
+                                // unknown exception, bail out
+                                goto case TaskStatus.Canceled;
+                            }
+                            break;
+
+                        case TaskStatus.RanToCompletion:
+                            // the download completed. Lets await it to connect up the invocation, then start any jobs that can now start.
+                            downloadTasks[i] = null; // clear the task so we don't hit it again
+                            _ = downloadedPackages.Add(i);
+                            await completed;
+
+                            for (var j = 0; j < jobsToStart.Count; j++)
+                            {
+                                var (needs, job) = jobsToStart[j];
+
+                                if (!needs.All(downloadedPackages.Contains))
+                                {
+                                    // not all of this jobs requirements are downloaded, keep checking
+                                    continue;
+                                }
+
+                                // we have everything we need, set up the arrays we need to pass to the job
+                                // first, remove it from our list though
+                                jobsToStart.RemoveAt(j--);
+
+                                var packages = new UnityPackage[needs.Length];
+                                var archivePaths = new string[needs.Length];
+
+                                for (var k = 0; k < needs.Length; k++)
+                                {
+                                    var jobIndex = needs[k];
+                                    packages[k] = plan.Packages[jobIndex].Package;
+                                    archivePaths[k] = targetPaths[jobIndex];
+                                }
+
+                                // give it its own temp dir
+                                var localTmpDir = Path.Combine(tmpDirectory, jobsToStart.Count.ToString());
+
+                                // and start the job
+                                jobTasks.Add(
+                                    job.ExtractFromAssets(this, localTmpDir,
+                                        ImmutableCollectionsMarshal.AsImmutableArray(packages),
+                                        ImmutableCollectionsMarshal.AsImmutableArray(archivePaths),
+                                        cancellationToken));
+                            }
+                            break;
+                    }
+                }
+
+                // we've now downloaded all of our assets, and are just waiting for the jobs to complete
+                await Task.WhenAll(jobTasks);
+            }
+            finally
+            {
+                Directory.Delete(tmpDirectory, true);
+            }
+        }
+
         public async Task DownloadAsync(string downloadUrl, string archivePath, CancellationToken cancellationToken)
         {
             if (File.Exists(archivePath))
@@ -636,21 +771,36 @@ namespace UnityDataMiner
             }
             else
             {
-                Log.Information("[{Version}] Downloading {Url}", Version, downloadUrl);
                 using var stopwatch = new AutoStopwatch();
-
-                await using (var stream = await _httpClient.GetStreamAsync(downloadUrl, cancellationToken))
-                await using (var fileStream = File.OpenWrite(archivePath + ".part"))
+                try
                 {
-                    await stream.CopyToAsync(fileStream, cancellationToken);
+                    await _downloadLock.WaitAsync(cancellationToken);
+
+                    Log.Information("[{Version}] Downloading {Url}", Version, downloadUrl);
+                    stopwatch.Restart();
+
+                    await using (var stream = await _httpClient.GetStreamAsync(downloadUrl, cancellationToken))
+                    await using (var fileStream = File.OpenWrite(archivePath + ".part"))
+                    {
+                        await stream.CopyToAsync(fileStream, cancellationToken);
+                    }
+                }
+                finally
+                {
+                    if (!cancellationToken.IsCancellationRequested)
+                    {
+                        _downloadLock.Release();
+                    }
                 }
 
+                // do move outside lock in case it takes a lot of time
                 File.Move(archivePath + ".part", archivePath);
 
                 Log.Information("[{Version}] Downloaded {Url} in {Time}", Version, downloadUrl, stopwatch.Elapsed);
             }
         }
 
+        // TODO: it's probably a good idea to lock around extraction for the double-extract cases
         public async Task ExtractAsync(string archivePath, string destinationDirectory, string[] filter,
             CancellationToken cancellationToken, bool flat = true)
         {

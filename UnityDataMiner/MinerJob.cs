@@ -1,11 +1,10 @@
-﻿using AssetRipper.Primitives;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace UnityDataMiner
 {
-    internal abstract class MinerJob
+    public abstract class MinerJob
     {
         public abstract string Name { get; }
 
@@ -23,11 +22,21 @@ namespace UnityDataMiner
             CancellationToken cancellationToken);
     }
 
+    // TODO: we may be able to replace the heuristic size with actual size, but that doesn't really
+    //       enable us to encode preference
+
     // AllowMissing means that if this package isn't available for the given Unity version,
     // the dependency group this is a part of is still otherwise valid.
-    internal readonly record struct UnityPackage(UnityPackageKind Kind, EditorOS OS, bool AllowMissing = false)
+    public readonly record struct UnityPackage(UnityPackageKind Kind, EditorOS OS, bool AllowMissing = false)
     {
-        public int HeuristicSize => Kind.GetRelativePackageSize() + (OS is EditorOS.Windows ? 2 : 0);
+        public int HeuristicSize => Kind.GetRelativePackageSize() + (OS switch
+        {
+            EditorOS.Any => 0,
+            EditorOS.Windows => 2,
+            EditorOS.Linux => 0,
+            EditorOS.MacOS => 1,
+            _ => throw new System.NotImplementedException(),
+        });
 
         public bool Matches(UnityPackage package)
             => Kind == package.Kind
@@ -35,9 +44,9 @@ namespace UnityDataMiner
     }
 
     // requires ALL packages to do its job
-    internal readonly record struct MinerDependencyOption(ImmutableArray<UnityPackage> NeededPackages);
+    public readonly record struct MinerDependencyOption(ImmutableArray<UnityPackage> NeededPackages);
 
-    internal enum UnityPackageKind
+    public enum UnityPackageKind
     {
         Editor,
         Android,
@@ -46,13 +55,13 @@ namespace UnityDataMiner
         MacMonoSupport
     }
 
-    internal static class UnityPackageKindExtensions
+    public static class UnityPackageKindExtensions
     {
         // We use this during planning as a heuristic to minimize the overall download size.
         public static int GetRelativePackageSize(this UnityPackageKind kind)
             => kind switch
             {
-                UnityPackageKind.Editor => 6,
+                UnityPackageKind.Editor => 10,
                 UnityPackageKind.Android => 1,
                 UnityPackageKind.WindowsMonoSupport => 1,
                 UnityPackageKind.LinuxMonoSupport => 1,
@@ -61,7 +70,7 @@ namespace UnityDataMiner
             };
     }
 
-    internal enum EditorOS
+    public enum EditorOS
     {
         Any,
         Windows,
