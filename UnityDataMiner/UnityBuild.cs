@@ -641,7 +641,7 @@ namespace UnityDataMiner
         {
             var jobsToStart = plan.Jobs.ToBuilder();
 
-            var tmpDirectory = Path.Combine(Path.GetTempPath(), "UnityDataMiner", Version.ToString()); ;
+            var tmpDirectory = Path.Combine(Path.GetTempPath(), "UnityDataMiner", Version.ToString());
             Directory.CreateDirectory(tmpDirectory);
 
             try
@@ -742,6 +742,7 @@ namespace UnityDataMiner
 
                                 // give it its own temp dir
                                 var localTmpDir = Path.Combine(tmpDirectory, jobsToStart.Count.ToString());
+                                Directory.CreateDirectory(localTmpDir);
 
                                 // and start the job
                                 jobTasks.Add(

@@ -238,6 +238,11 @@ namespace UnityDataMiner
         {
             if (info is null) return null;
 
+            // Don't get support packages from the same OS as the target of the support package
+            if (kind is UnityPackageKind.WindowsMonoSupport && selectedOs is EditorOS.Windows) return null;
+            if (kind is UnityPackageKind.LinuxMonoSupport && selectedOs is EditorOS.Linux) return null;
+            if (kind is UnityPackageKind.MacMonoSupport && selectedOs is EditorOS.MacOS) return null;
+
             var module = kind switch
             {
                 UnityPackageKind.Editor => info.Unity,
