@@ -130,10 +130,11 @@ namespace UnityDataMiner
             "System.Xml.Linq",
         };
 
-        private bool HasLinuxEditor => LinuxInfo is not null;
-        private bool HasModularPlayer => Version >= _firstMergedModularVersion;
-        private bool IsMonolithic => Version.IsMonolithic();
-        private bool HasLibIl2Cpp => Version >= _firstLibIl2CppVersion;
+        public bool HasLinuxEditor => LinuxInfo is not null;
+        public bool HasModularPlayer => Version >= _firstMergedModularVersion;
+        public bool IsMonolithic => Version.IsMonolithic();
+        public bool HasLibIl2Cpp => Version >= _firstLibIl2CppVersion;
+        public bool IsLegacyDownload => Id == null || Version.Major < 5;
 
         public bool NeedsInfoFetch { get; private set; }
 
@@ -650,7 +651,7 @@ namespace UnityDataMiner
             }
         }
 
-        private async Task ExtractAsync(string archivePath, string destinationDirectory, string[] filter,
+        public async Task ExtractAsync(string archivePath, string destinationDirectory, string[] filter,
             CancellationToken cancellationToken, bool flat = true)
         {
             var archiveDirectory = Path.Combine(Path.GetDirectoryName(archivePath)!,
@@ -660,33 +661,41 @@ namespace UnityDataMiner
             switch (extension)
             {
                 case ".pkg":
-                {
-                    const string payloadName = "Payload~";
-                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
-                        cancellationToken);
-                    await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory,
-                        filter, flat, cancellationToken);
+                    {
+                        const string payloadName = "Payload~";
+                        var payloadPath = Path.Combine(archiveDirectory, payloadName);
+                        if (!File.Exists(payloadPath))
+                        {
+                            await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
+                                cancellationToken);
+                        }
+                        await SevenZip.ExtractAsync(payloadPath, destinationDirectory,
+                            filter, flat, cancellationToken);
 
-                    break;
-                }
+                        break;
+                    }
 
                 case ".exe":
-                {
-                    await SevenZip.ExtractAsync(archivePath, destinationDirectory, filter, flat, cancellationToken);
+                    {
+                        await SevenZip.ExtractAsync(archivePath, destinationDirectory, filter, flat, cancellationToken);
 
-                    break;
-                }
+                        break;
+                    }
 
                 case ".xz":
-                {
-                    string payloadName = Path.GetFileNameWithoutExtension(archivePath);
-                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
-                        cancellationToken);
-                    await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory,
-                        filter, flat, cancellationToken);
+                    {
+                        string payloadName = Path.GetFileNameWithoutExtension(archivePath);
+                        var payloadPath = Path.Combine(archiveDirectory, payloadName);
+                        if (!File.Exists(payloadPath))
+                        {
+                            await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
+                                cancellationToken);
+                        }
+                        await SevenZip.ExtractAsync(payloadPath, destinationDirectory,
+                            filter, flat, cancellationToken);
 
-                    break;
-                }
+                        break;
+                    }
 
                 default:
                     throw new ArgumentOutOfRangeException(nameof(extension), extension, "Unrecognized archive type");
