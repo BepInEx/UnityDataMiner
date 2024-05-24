@@ -628,7 +628,7 @@ namespace UnityDataMiner
             }
         }
 
-        private async Task DownloadAsync(string downloadUrl, string archivePath, CancellationToken cancellationToken)
+        public async Task DownloadAsync(string downloadUrl, string archivePath, CancellationToken cancellationToken)
         {
             if (File.Exists(archivePath))
             {

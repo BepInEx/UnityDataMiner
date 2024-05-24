@@ -25,7 +25,14 @@ namespace UnityDataMiner
 
     // AllowMissing means that if this package isn't available for the given Unity version,
     // the dependency group this is a part of is still otherwise valid.
-    internal readonly record struct UnityPackage(UnityPackageKind Kind, EditorOS OS, bool AllowMissing = false);
+    internal readonly record struct UnityPackage(UnityPackageKind Kind, EditorOS OS, bool AllowMissing = false)
+    {
+        public int HeuristicSize => Kind.GetRelativePackageSize() + (OS is EditorOS.Windows ? 2 : 0);
+
+        public bool Matches(UnityPackage package)
+            => Kind == package.Kind
+            && (OS == package.OS || OS is EditorOS.Any || package.OS is EditorOS.Any);
+    }
 
     // requires ALL packages to do its job
     internal readonly record struct MinerDependencyOption(ImmutableArray<UnityPackage> NeededPackages);
