@@ -23,7 +23,9 @@ namespace UnityDataMiner
             CancellationToken cancellationToken);
     }
 
-    internal readonly record struct UnityPackage(UnityPackageKind Kind, EditorOS OS);
+    // AllowMissing means that if this package isn't available for the given Unity version,
+    // the dependency group this is a part of is still otherwise valid.
+    internal readonly record struct UnityPackage(UnityPackageKind Kind, EditorOS OS, bool AllowMissing = false);
 
     // requires ALL packages to do its job
     internal readonly record struct MinerDependencyOption(ImmutableArray<UnityPackage> NeededPackages);
@@ -35,6 +37,21 @@ namespace UnityDataMiner
         WindowsMonoSupport,
         LinuxMonoSupport,
         MacMonoSupport
+    }
+
+    internal static class UnityPackageKindExtensions
+    {
+        // We use this during planning as a heuristic to minimize the overall download size.
+        public static int GetRelativePackageSize(this UnityPackageKind kind)
+            => kind switch
+            {
+                UnityPackageKind.Editor => 6,
+                UnityPackageKind.Android => 1,
+                UnityPackageKind.WindowsMonoSupport => 1,
+                UnityPackageKind.LinuxMonoSupport => 1,
+                UnityPackageKind.MacMonoSupport => 1,
+                _ => 0,
+            };
     }
 
     internal enum EditorOS
