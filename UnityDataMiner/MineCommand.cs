@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
@@ -12,6 +13,7 @@ using AssetRipper.Primitives;
 using LibGit2Sharp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using UnityDataMiner.Jobs;
 
 namespace UnityDataMiner;
 
@@ -81,13 +83,21 @@ public partial class MineCommand : RootCommand
                 ? unityVersions.Where(unityVersion => unityVersion.IsRunNeeded).ToArray()
                 : unityVersions.Where(v => Version.Contains(v.ShortVersion)).ToArray();
 
+            var jobs = ImmutableArray.Create<MinerJob>([
+                new AndroidMinerJob(),
+                new CorlibMinerJob(),
+                new LibIl2CppSourceMinerJob(),
+                new MonoMinerJob(),
+            ]);
+
             _logger.LogInformation("Mining {Count} unity versions", toRun.Length);
 
             await Parallel.ForEachAsync(toRun, token, async (unityVersion, cancellationToken) =>
             {
                 try
                 {
-                    await unityVersion.MineAsync(cancellationToken);
+                    //await unityVersion.MineAsync(cancellationToken);
+                    await unityVersion.ExecuteJobsAsync(jobs, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

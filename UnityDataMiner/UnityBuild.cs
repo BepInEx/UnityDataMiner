@@ -630,7 +630,7 @@ namespace UnityDataMiner
             }
         }
 
-        public Task ExecuteJobs(ImmutableArray<MinerJob> jobs, CancellationToken cancellationToken)
+        public Task ExecuteJobsAsync(ImmutableArray<MinerJob> jobs, CancellationToken cancellationToken)
         {
             var plan = JobPlanner.Plan(jobs, this, cancellationToken);
             if (plan is null) return Task.CompletedTask; // if we failed to find a plan for a problematic reason, it's already been logged
