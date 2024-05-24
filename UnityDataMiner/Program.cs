@@ -46,10 +46,6 @@ namespace UnityDataMiner
                             })
                             .UseCommandHandler<MineCommand, MineCommand.Handler>()
                             .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
-#if DEBUG
-                                .MinimumLevel.Debug()
-#endif
-
                                 .ReadFrom.Configuration(context.Configuration)
                                 .Enrich.FromLogContext()
                                 .WriteTo.Console());

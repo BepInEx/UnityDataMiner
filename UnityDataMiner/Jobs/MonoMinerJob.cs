@@ -58,6 +58,7 @@ namespace UnityDataMiner.Jobs
             CancellationToken cancellationToken)
         {
             var monoBaseDir = Path.Combine(tmpDir, "mono");
+            Directory.CreateDirectory(monoBaseDir);
 
             Log.Information("[{Version}] Packaging Mono binaries", build.Version);
             using var stopwatch = new AutoStopwatch();
@@ -142,7 +143,8 @@ namespace UnityDataMiner.Jobs
                                         }
 
                                         // then we can create the zip file
-                                        ZipFile.CreateFromDirectory(monoBaseDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
+                                        // TODO: why do we get 'process cannot access file' exception here?
+                                        ZipFile.CreateFromDirectory(mono, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
                                     }
                                 }
                             }
@@ -183,6 +185,12 @@ namespace UnityDataMiner.Jobs
                             throw new NotImplementedException();
                     }
                 }
+            }
+
+            Directory.CreateDirectory(build.MonoPath);
+            foreach (var zip in Directory.EnumerateFiles(monoBaseDir, "*.zip"))
+            {
+                File.Move(zip, Path.Combine(build.MonoPath, Path.GetFileName(zip)));
             }
 
             Log.Information("[{Version}] Mono binaries packaged in {Time}", build.Version, stopwatch.Elapsed);
