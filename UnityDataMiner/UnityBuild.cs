@@ -33,7 +33,7 @@ namespace UnityDataMiner
 
         public NuGetVersion NuGetVersion { get; }
 
-        public string ZipFilePath { get; }
+        public string UnityLibsZipFilePath { get; }
 
         public string MonoPath { get; }
 
@@ -47,7 +47,7 @@ namespace UnityDataMiner
 
         public string LibIl2CppSourceZipPath { get; }
 
-        public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) ||
+        public bool IsRunNeeded => !File.Exists(UnityLibsZipFilePath) || !File.Exists(NuGetPackagePath) ||
                                    !File.Exists(CorlibZipPath) || !Directory.Exists(MonoPath) ||
                                    (HasLibIl2Cpp && !File.Exists(LibIl2CppSourceZipPath)) ||
                                    (!Version.IsMonolithic() && !Directory.Exists(AndroidPath));
@@ -85,7 +85,7 @@ namespace UnityDataMiner
 
             var versionName = Version.Type == UnityVersionType.Final ? ShortVersion : Version.ToString();
             var zipName = $"{versionName}.zip";
-            ZipFilePath = Path.Combine(repositoryPath, "libraries", zipName);
+            UnityLibsZipFilePath = Path.Combine(repositoryPath, "libraries", zipName);
             MonoPath = Path.Combine(repositoryPath, "mono", versionName);
             AndroidPath = Path.Combine(repositoryPath, "android", versionName);
             CorlibZipPath = Path.Combine(repositoryPath, "corlibs", zipName);
@@ -435,13 +435,13 @@ namespace UnityDataMiner
                 }
 
                 // process unity libs
-                if (!File.Exists(ZipFilePath))
+                if (!File.Exists(UnityLibsZipFilePath))
                 {
                     Log.Information("[{Version}] Extracting mono libraries", Version);
                     using (var stopwatch = new AutoStopwatch())
                     {
                         await ExtractManagedDir();
-                        ZipFile.CreateFromDirectory(managedDirectory, ZipFilePath);
+                        ZipFile.CreateFromDirectory(managedDirectory, UnityLibsZipFilePath);
                         Log.Information("[{Version}] Extracted mono libraries in {Time}", Version, stopwatch.Elapsed);
                     }
                 }

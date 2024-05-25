@@ -88,6 +88,7 @@ public partial class MineCommand : RootCommand
                 new CorlibMinerJob(),
                 new LibIl2CppSourceMinerJob(),
                 new MonoMinerJob(),
+                new UnityLibsMinerJob(),
             ]);
 
             _logger.LogInformation("Mining {Count} unity versions", toRun.Length);
