@@ -644,6 +644,8 @@ namespace UnityDataMiner
             var tmpDirectory = Path.Combine(Path.GetTempPath(), "UnityDataMiner", Version.ToString());
             Directory.CreateDirectory(tmpDirectory);
 
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
             try
             {
                 var targetPaths = new string[plan.Packages.Length];
@@ -656,7 +658,7 @@ namespace UnityDataMiner
                     var arcPath = Path.Combine(tmpDirectory, i + "-" + targetName);
                     targetPaths[i] = arcPath;
                     // start all download tasks simultaneously to try to fully saturate our allowed parallel downlads
-                    downloadTasks[i] = DownloadAsync(BaseDownloadUrl + package.Url, arcPath, cancellationToken);
+                    downloadTasks[i] = DownloadAndPreExtractAsync(BaseDownloadUrl + package.Url, arcPath, cts.Token);
                 }
 
                 var jobTasks = new List<Task>(jobsToStart.Count);
@@ -682,6 +684,8 @@ namespace UnityDataMiner
 
                         case TaskStatus.Canceled:
                             // download was cancelled, which means that our own CT was set. Wait for everything, and (inevitably) bail.
+                            // First, lets cancel everything though. Want to bail as quickly as possible.
+                            await cts.CancelAsync();
                             await Task.WhenAll(jobTasks.Concat(downloadTasks.Where(t => t is not null))!);
                             break;
 
@@ -698,10 +702,10 @@ namespace UnityDataMiner
                                 {
                                     Log.Warning("[{Version}] Failed to download {Url}, waiting 5 seconds before retrying...", @this.Version, url);
                                     await Task.Delay(5000, cancellationToken);
-                                    await @this.DownloadAsync(@this.BaseDownloadUrl + url, packagePath, cancellationToken);
+                                    await @this.DownloadAndPreExtractAsync(@this.BaseDownloadUrl + url, packagePath, cancellationToken);
                                 }
 
-                                downloadTasks[i] = RetryDownload(this, plan.Packages[i].Url, targetPaths[i], cancellationToken);
+                                downloadTasks[i] = RetryDownload(this, plan.Packages[i].Url, targetPaths[i], cts.Token);
                             }
                             else
                             {
@@ -716,40 +720,74 @@ namespace UnityDataMiner
                             _ = downloadedPackages.Add(i);
                             await completed;
 
+                            var incrNo = 0;
                             for (var j = 0; j < jobsToStart.Count; j++)
                             {
                                 var (needs, job) = jobsToStart[j];
 
-                                if (!needs.All(downloadedPackages.Contains))
+                                if (job.RunIncrementally)
                                 {
-                                    // not all of this jobs requirements are downloaded, keep checking
-                                    continue;
+                                    // incremental job
+                                    if (!needs.Contains(i))
+                                    {
+                                        // this package isn't one that this job cares about
+                                        continue;
+                                    }
+
+                                    // this job cares about this package; invoke for it
+
+                                    // create its temp dir
+                                    var localTmpDir = Path.Combine(tmpDirectory, $"i-{i}-{incrNo++}");
+                                    Directory.CreateDirectory(localTmpDir);
+
+                                    var incPackage = plan.Packages[i];
+                                    var incTargetPath = targetPaths[i];
+
+                                    Log.Debug("[{Version}] Starting job {Job} incrementally for {Asset}", Version, job.Name, Path.GetFileName(incPackage.Url));
+
+                                    // start the job
+                                    jobTasks.Add(
+                                        job.ExtractFromAssets(this, localTmpDir,
+                                            [incPackage.Package],
+                                            [incTargetPath],
+                                            cts.Token));
                                 }
-
-                                // we have everything we need, set up the arrays we need to pass to the job
-                                // first, remove it from our list though
-                                jobsToStart.RemoveAt(j--);
-
-                                var packages = new UnityPackage[needs.Length];
-                                var archivePaths = new string[needs.Length];
-
-                                for (var k = 0; k < needs.Length; k++)
+                                else
                                 {
-                                    var jobIndex = needs[k];
-                                    packages[k] = plan.Packages[jobIndex].Package;
-                                    archivePaths[k] = targetPaths[jobIndex];
+                                    // normal, non-incremental job
+                                    if (!needs.All(downloadedPackages.Contains))
+                                    {
+                                        // not all of this jobs requirements are downloaded, keep checking
+                                        continue;
+                                    }
+
+                                    // we have everything we need, set up the arrays we need to pass to the job
+                                    // first, remove it from our list though
+                                    jobsToStart.RemoveAt(j--);
+
+                                    var packages = new UnityPackage[needs.Length];
+                                    var archivePaths = new string[needs.Length];
+
+                                    for (var k = 0; k < needs.Length; k++)
+                                    {
+                                        var jobIndex = needs[k];
+                                        packages[k] = plan.Packages[jobIndex].Package;
+                                        archivePaths[k] = targetPaths[jobIndex];
+                                    }
+
+                                    // give it its own temp dir
+                                    var localTmpDir = Path.Combine(tmpDirectory, jobsToStart.Count.ToString());
+                                    Directory.CreateDirectory(localTmpDir);
+
+                                    Log.Debug("[{Version}] Starting job {Job} (local dir: {RemainingJobs})", Version, job.Name, jobsToStart.Count);
+
+                                    // and start the job
+                                    jobTasks.Add(
+                                        job.ExtractFromAssets(this, localTmpDir,
+                                            ImmutableCollectionsMarshal.AsImmutableArray(packages),
+                                            ImmutableCollectionsMarshal.AsImmutableArray(archivePaths),
+                                            cts.Token));
                                 }
-
-                                // give it its own temp dir
-                                var localTmpDir = Path.Combine(tmpDirectory, jobsToStart.Count.ToString());
-                                Directory.CreateDirectory(localTmpDir);
-
-                                // and start the job
-                                jobTasks.Add(
-                                    job.ExtractFromAssets(this, localTmpDir,
-                                        ImmutableCollectionsMarshal.AsImmutableArray(packages),
-                                        ImmutableCollectionsMarshal.AsImmutableArray(archivePaths),
-                                        cancellationToken));
                             }
                             break;
                     }
@@ -762,6 +800,15 @@ namespace UnityDataMiner
             {
                 Directory.Delete(tmpDirectory, true);
             }
+        }
+
+        private async Task DownloadAndPreExtractAsync(string downloadUrl, string archivePath, CancellationToken cancellationToken)
+        {
+            await DownloadAsync(downloadUrl, archivePath, cancellationToken);
+            // run a pre-extraction on the archive, if it's one that needs it, to avoid data races later
+            Log.Information("[{Version}] Pre-extracting {Archive}", Version, Path.GetFileName(archivePath));
+            await ExtractAsync(archivePath, "", [], cancellationToken, firstStageOnly: true);
+            Log.Information("[{Version}] Pre-extract complete", Version);
         }
 
         public async Task DownloadAsync(string downloadUrl, string archivePath, CancellationToken cancellationToken)
@@ -803,7 +850,7 @@ namespace UnityDataMiner
 
         // TODO: it's probably a good idea to lock around extraction for the double-extract cases
         public async Task ExtractAsync(string archivePath, string destinationDirectory, string[] filter,
-            CancellationToken cancellationToken, bool flat = true)
+            CancellationToken cancellationToken, bool flat = true, bool firstStageOnly = false)
         {
             var archiveDirectory = Path.Combine(Path.GetDirectoryName(archivePath)!,
                 Path.GetFileNameWithoutExtension(archivePath));
@@ -812,41 +859,50 @@ namespace UnityDataMiner
             switch (extension)
             {
                 case ".pkg":
+                {
+                    const string payloadName = "Payload~";
+                    var payloadPath = Path.Combine(archiveDirectory, payloadName);
+                    if (!File.Exists(payloadPath))
                     {
-                        const string payloadName = "Payload~";
-                        var payloadPath = Path.Combine(archiveDirectory, payloadName);
-                        if (!File.Exists(payloadPath))
-                        {
-                            await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
-                                cancellationToken);
-                        }
+                        await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
+                            cancellationToken);
+                    }
+                    if (!firstStageOnly)
+                    {
                         await SevenZip.ExtractAsync(payloadPath, destinationDirectory,
                             filter, flat, cancellationToken);
-
-                        break;
                     }
+
+                    break;
+                }
 
                 case ".exe":
+                {
+                    if (!firstStageOnly)
                     {
                         await SevenZip.ExtractAsync(archivePath, destinationDirectory, filter, flat, cancellationToken);
-
-                        break;
                     }
+
+                    break;
+                }
 
                 case ".xz":
+                {
+                    string payloadName = Path.GetFileNameWithoutExtension(archivePath);
+                    var payloadPath = Path.Combine(archiveDirectory, payloadName);
+                    if (!File.Exists(payloadPath))
                     {
-                        string payloadName = Path.GetFileNameWithoutExtension(archivePath);
-                        var payloadPath = Path.Combine(archiveDirectory, payloadName);
-                        if (!File.Exists(payloadPath))
-                        {
-                            await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
-                                cancellationToken);
-                        }
+                        await SevenZip.ExtractAsync(archivePath, archiveDirectory, [payloadName], true,
+                            cancellationToken);
+                    }
+                    if (!firstStageOnly)
+                    {
                         await SevenZip.ExtractAsync(payloadPath, destinationDirectory,
                             filter, flat, cancellationToken);
-
-                        break;
                     }
+
+                    break;
+                }
 
                 default:
                     throw new ArgumentOutOfRangeException(nameof(extension), extension, "Unrecognized archive type");

@@ -17,6 +17,8 @@ namespace UnityDataMiner.Jobs
         public override bool ShouldRunFor(UnityBuild build)
             => !Directory.Exists(build.MonoPath);
 
+        public override bool RunIncrementally => true;
+
         public override ImmutableArray<MinerDependencyOption> GetDependencies(UnityBuild build)
             => [
                 // first, prefer getting just a component for each

@@ -16,6 +16,10 @@ namespace UnityDataMiner
         // returns a set of options, i.e. OR'd, in order of preference.
         public abstract ImmutableArray<MinerDependencyOption> GetDependencies(UnityBuild build);
 
+        // if true, each dependency will be passed in as it is downloaded
+        // note: the order guarantee that is normally provided in ExtractFromAssets does not apply in this case
+        public virtual bool RunIncrementally => false;
+
         // chosenPackages is in the same order as the dependency, but with the Any OS replaced with the actually selected OS
         public abstract Task ExtractFromAssets(UnityBuild build, string tmpDir,
             ImmutableArray<UnityPackage> chosenPackages, ImmutableArray<string> packagePaths,
