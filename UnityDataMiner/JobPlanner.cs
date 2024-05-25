@@ -45,6 +45,8 @@ namespace UnityDataMiner
                 return null;
             }
 
+            Log.Information("[{Version}] {Jobs} jobs to run", build.Version, needJobs.Count);
+
             var planTree = new PlanTree(build, needJobs, jobDeps);
 
             return planTree.ComputeFullJobPlan(cancellationToken);

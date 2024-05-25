@@ -24,7 +24,7 @@ public partial class MineCommand : RootCommand
 
     public MineCommand()
     {
-        Add(new Argument<string[]?>("version")
+        Add(new Argument<string[]?>("versions")
         {
             Arity = ArgumentArity.ZeroOrMore,
         });
@@ -37,7 +37,7 @@ public partial class MineCommand : RootCommand
         private readonly MinerOptions _minerOptions;
         private readonly IHttpClientFactory _clientFactory;
 
-        public string[]? Version { get; init; }
+        public string[]? Versions { get; init; }
         public DirectoryInfo Repository { get; init; }
 
         public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions, IHttpClientFactory clientFactory)
@@ -79,9 +79,9 @@ public partial class MineCommand : RootCommand
                 }
             });
 
-            var toRun = Version is null
-                ? unityVersions.Where(unityVersion => unityVersion.IsRunNeeded).ToArray()
-                : unityVersions.Where(v => Version.Contains(v.ShortVersion)).ToArray();
+            var toRun = Versions is null or []
+                ? unityVersions.ToArray()
+                : unityVersions.Where(v => Versions.Contains(v.ShortVersion)).ToArray();
 
             var jobs = ImmutableArray.Create<MinerJob>([
                 new AndroidMinerJob(),

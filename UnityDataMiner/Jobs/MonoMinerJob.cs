@@ -143,7 +143,6 @@ namespace UnityDataMiner.Jobs
                                         }
 
                                         // then we can create the zip file
-                                        // TODO: why do we get 'process cannot access file' exception here?
                                         ZipFile.CreateFromDirectory(mono, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
                                     }
                                 }
