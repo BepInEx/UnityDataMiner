@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.CommandLine;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading;
@@ -187,9 +188,10 @@ namespace UnityDataMiner
                         var matchingDepOptions = new List<MinerDependencyOption>();
                         foreach (var deps in jobDeps)
                         {
-                            var anySetSatisfied = false;
+                            (MinerDependencyOption depOpt, int skipped)? option = null;
                             foreach (var depSet in deps)
                             {
+                                var skipped = 0;
                                 foreach (var dep in depSet.NeededPackages)
                                 {
                                     var isSatisfied = false;
@@ -202,20 +204,38 @@ namespace UnityDataMiner
                                         }
                                     }
 
-                                    if (!isSatisfied && !dep.AllowMissing) goto NextSet;
+                                    if (!isSatisfied)
+                                    {
+                                        if (dep.AllowMissing)
+                                        {
+                                            skipped++;
+                                            continue;
+                                        }
+                                        else
+                                        {
+                                            goto NextSet;
+                                        }
+                                    }
                                 }
 
-                                anySetSatisfied = true;
-                                matchingDepOptions.Add(depSet);
-                                break;
+                                // make sure we pick the dep set with the least skipped deps
+                                if (option is null || skipped < option.Value.skipped)
+                                {
+                                    option = (depSet, skipped);
+                                }
 
                             NextSet:;
                             }
 
-                            if (!anySetSatisfied)
+                            if (option is not (var set, _))
                             {
                                 // this job doesn't have its deps satisfied; skip
                                 goto NextIter;
+                            }
+                            else
+                            {
+                                // this job has deps satisfied
+                                matchingDepOptions.Add(set);
                             }
                         }
 
