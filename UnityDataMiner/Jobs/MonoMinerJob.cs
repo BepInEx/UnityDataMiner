@@ -1,5 +1,6 @@
 ﻿using Serilog;
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.IO.Compression;
@@ -100,200 +101,139 @@ namespace UnityDataMiner.Jobs
                     var thisPkgDir = Path.Combine(monoBaseDir, monoTargetOs.ToString());
                     Directory.CreateDirectory(thisPkgDir);
 
-                    switch (build.Version.Major)
+                    var playerdirSuffix = (build.Version.Major, monoTargetOs) switch
                     {
-                        case >= 2021:
+                        ( >= 2021, _) => "_player_nondevelopment_mono",
+                        (_, EditorOS.Linux) => "_withgfx_nondevelopment_mono",
+                        _ => "_nondevelopment_mono"
+                    };
+
+                    var prefix = "**/";
+                    var extractPath = monoTargetOs switch
+                    {
+                        // TODO: editor package paths
+
+                        EditorOS.Windows => $"Variations/*{playerdirSuffix}/**",
+                        EditorOS.Linux => $"Variations/*{playerdirSuffix}/**",
+                        EditorOS.MacOS => $"Variations/*{playerdirSuffix}/UnityPlayer.app/Contents/**",
+
+                        _ => throw new NotImplementedException()
+                    };
+
+                    if (packageKind is UnityPackageKind.Editor)
+                    {
+                        var editorPrefixPath = monoTargetOs switch
                         {
-                            var (prefix, extractPath, variationsBase, inPlayerDir) = (monoTargetOs, packageKind) switch
+                            EditorOS.Windows => throw new NotImplementedException(),
+                            EditorOS.Linux => "Editor/Data/PlaybackEngines/LinuxStandaloneSupport/",
+                            EditorOS.MacOS => "Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/",
+
+                            _ => throw new NotSupportedException(),
+                        };
+                        extractPath = editorPrefixPath + extractPath;
+                    }
+
+                    if (monoTargetOs is not EditorOS.MacOS || packageKind is not UnityPackageKind.Editor)
+                    {
+                        // Windows and Linux layouts are relatively convenient
+                        await build.ExtractAsync(packagePath, thisPkgDir, [prefix + extractPath], cancellationToken, flat: false);
+                        var variationsDir = GetVariationsDir(build, thisPkgDir);
+                        if (variationsDir is null) continue; // can't do anything without a known variations dir
+
+                        foreach (var playerDir in Directory.EnumerateDirectories(variationsDir))
+                        {
+                            var arch = Path.GetFileName(playerDir).Replace(playerdirSuffix, "");
+                            if (!arch.Contains(targetOsName))
                             {
-                                // TODO: editor package paths
-
-                                (EditorOS.Windows, _) => ("./", "Variations/*_player_nondevelopment_mono/Mon*/**", "Variations", ""),
-                                (EditorOS.Linux, _) => ("./", "Variations/*_player_nondevelopment_mono/Data/Mon*/**", "Variations", "Data/"),
-                                (EditorOS.MacOS, _) => ("./", "Variations/*_player_nondevelopment_mono/UnityPlayer.app/Contents/Frameworks/lib*", "Variations", ""),
-
-                                _ => throw new NotImplementedException()
-                            };
-
-                            if (packageKind is UnityPackageKind.Editor)
-                            {
-                                var editorPrefixPath = monoTargetOs switch
-                                {
-                                    EditorOS.Windows => throw new NotImplementedException(),
-                                    EditorOS.Linux => "Editor/Data/PlaybackEngines/LinuxStandaloneSupport/",
-                                    EditorOS.MacOS => throw new NotImplementedException(),
-
-                                    _ => throw new NotSupportedException(),
-                                };
-                                extractPath = editorPrefixPath + extractPath;
-                                variationsBase = editorPrefixPath + variationsBase;
+                                arch = targetOsName + "_" + arch;
                             }
 
-                            var variationsDir = !string.IsNullOrEmpty(variationsBase) ? Path.Combine(thisPkgDir, variationsBase) : thisPkgDir;
-
-                            if (monoTargetOs is not EditorOS.MacOS)
+                            // search subdirs so we can find multiple Mono builds
+                            foreach (var mono in Directory.EnumerateDirectories(playerDir, "Mono*", SearchOption.AllDirectories))
                             {
-                                // Windows and Linux layouts are relatively convenient
-                                await build.ExtractAsync(packagePath, thisPkgDir, [prefix + extractPath], cancellationToken, flat: false);
-
-                                foreach (var playerDir in Directory.EnumerateDirectories(variationsDir))
+                                if (!Directory.Exists(Path.Combine(mono, "etc")))
                                 {
-                                    var arch = Path.GetFileName(playerDir).Replace("_player_nondevelopment_mono", "");
-                                    if (!arch.Contains(targetOsName))
-                                    {
-                                        arch = targetOsName + "_" + arch;
-                                    }
+                                    // if we couldn't find an etc folder, skip it; it's not an actual Mono dir
+                                }
 
-                                    var monoRoot = !string.IsNullOrEmpty(inPlayerDir) ? Path.Combine(playerDir, inPlayerDir) : playerDir;
-                                    foreach (var mono in Directory.EnumerateDirectories(monoRoot))
-                                    {
-                                        var monoName = Path.GetFileName(mono);
+                                var monoName = Path.GetFileName(mono);
+                                var targetRuntimeDir = Path.Combine(mono, "runtime");
 
-                                        // If there's a dir that's not named "etc", rename that to "runtime"
-                                        foreach (var subdir in Directory.EnumerateDirectories(mono))
+                                // If there's a dir that's not named "etc", rename that to "runtime"
+                                var foundRuntimeDir = false;
+                                foreach (var subdir in Directory.EnumerateDirectories(mono))
+                                {
+                                    if (Path.GetFileName(subdir) != "etc")
+                                    {
+                                        var hasMonoBin = false;
+                                        foreach (var file in Directory.EnumerateFiles(subdir, "*mono*"))
                                         {
-                                            if (Path.GetFileName(subdir) != "etc")
+                                            if (Path.GetFileName(file).Contains("mono"))
                                             {
-                                                Directory.Move(subdir, Path.Combine(mono, "runtime"));
+                                                hasMonoBin = true;
                                                 break;
                                             }
                                         }
 
-                                        // then we can create the zip file
-                                        ZipFile.CreateFromDirectory(mono, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
+                                        if (!hasMonoBin)
+                                        {
+                                            // this dir doesn't actually have any Mono binaries, skip it
+                                            continue;
+                                        }
+
+                                        Directory.Move(subdir, targetRuntimeDir);
+                                        foundRuntimeDir = true;
+                                        break;
                                     }
                                 }
-                            }
-                            else
-                            {
-                                // MacOS has a more annoying layout. The config is entirely separate from the runtime. 
-                                await build.ExtractAsync(packagePath, thisPkgDir, [prefix + extractPath, "./Mono*/**"], cancellationToken, flat: false);
 
-                                // our outer loop is for the config
-                                foreach (var monoConfigDir in Directory.EnumerateDirectories(thisPkgDir, "Mono*"))
+                                if (!foundRuntimeDir && monoTargetOs is EditorOS.MacOS)
                                 {
-                                    var monoName = Path.GetFileName(monoConfigDir);
-                                    var runtimeDir = Path.Combine(monoConfigDir, "runtime");
-
-                                    foreach (var playerDir in Directory.EnumerateDirectories(variationsDir))
+                                    // on MacOS, the non-mac distribution is even more screwey than usual. The binaries are in /UnityPlayer.app/Contents/Frameworks/<MonoName>/MonoEmbedRuntime/osx/
+                                    var binariesDir = Path.Combine(playerDir, "UnityPlayer.app/Contents/Frameworks", monoName, "MonoEmbedRuntime/osx/");
+                                    if (!Directory.Exists(binariesDir))
                                     {
-                                        var arch = Path.GetFileName(playerDir).Replace("_player_nondevelopment_mono", "");
-                                        if (!arch.Contains(targetOsName))
-                                        {
-                                            arch = targetOsName + "_" + arch;
-                                        }
-
-                                        if (Directory.Exists(runtimeDir))
-                                        {
-                                            Directory.Delete(runtimeDir, true);
-                                        }
-
-                                        Directory.Move(Path.Combine(playerDir, "UnityPlayer.app", "Contents", "Frameworks"), runtimeDir);
-                                        ZipFile.CreateFromDirectory(monoConfigDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
+                                        Log.Warning("[{Version}] Could not find MacOS binaries ({TestDir})", build.Version, binariesDir);
+                                        continue; // no use trying to do anything useful here
                                     }
+                                    Directory.Move(binariesDir, targetRuntimeDir);
                                 }
+
+                                // then we can create the zip file
+                                ZipFile.CreateFromDirectory(mono, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
                             }
-
-                            break;
                         }
+                    }
+                    else
+                    {
+                        // MacOS has a more annoying layout. The config is entirely separate from the runtime. 
+                        await build.ExtractAsync(packagePath, thisPkgDir, [prefix + extractPath, "./Mono*/**"], cancellationToken, flat: false);
+                        var variationsDir = GetVariationsDir(build, thisPkgDir);
+                        if (variationsDir is null) continue; // can't do anything without a known variations dir
 
-                        case >= 5:
+                        // our outer loop is for the config
+                        foreach (var monoConfigDir in Directory.EnumerateDirectories(thisPkgDir, "Mono*"))
                         {
-                            var (prefix, extractPath, variationsBase, inPlayerDir) = (monoTargetOs, packageKind) switch
+                            var monoName = Path.GetFileName(monoConfigDir);
+                            var runtimeDir = Path.Combine(monoConfigDir, "runtime");
+
+                            foreach (var playerDir in Directory.EnumerateDirectories(variationsDir))
                             {
-                                // TODO: editor package paths
-
-                                (EditorOS.Windows, _) => ("./", "Variations/*_nondevelopment_mono/Data/Mon*/**", "Variations", ""),
-                                (EditorOS.Linux, _) => ("./", "Variations/*_withgfx_nondevelopment_mono/Data/Mon*/**", "Variations", "Data/"),
-                                (EditorOS.MacOS, _) => ("./", "Variations/*_nondevelopment_mono/UnityPlayer.app/Contents/Frameworks/lib*", "Variations", ""),
-
-                                _ => throw new NotImplementedException()
-                            };
-
-                            if (packageKind is UnityPackageKind.Editor)
-                            {
-                                var editorPrefixPath = monoTargetOs switch
+                                var arch = Path.GetFileName(playerDir).Replace(playerdirSuffix, "");
+                                if (!arch.Contains(targetOsName))
                                 {
-                                    EditorOS.Windows => throw new NotImplementedException(),
-                                    EditorOS.Linux => "Editor/Data/PlaybackEngines/LinuxStandaloneSupport/",
-                                    EditorOS.MacOS => "Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/",
-
-                                    _ => throw new NotSupportedException(),
-                                };
-                                extractPath = editorPrefixPath + extractPath;
-                                variationsBase = editorPrefixPath + variationsBase;
-                            }
-
-                            var variationsDir = !string.IsNullOrEmpty(variationsBase) ? Path.Combine(thisPkgDir, variationsBase) : thisPkgDir;
-
-                            if (monoTargetOs is not EditorOS.MacOS)
-                            {
-                                // Windows and Linux layouts are relatively convenient
-                                await build.ExtractAsync(packagePath, thisPkgDir, [prefix + extractPath], cancellationToken, flat: false);
-
-                                foreach (var playerDir in Directory.EnumerateDirectories(variationsDir))
-                                {
-                                    var arch = Path.GetFileName(playerDir).Replace("_withgfx_nondevelopment_mono", "");
-                                    if (!arch.Contains(targetOsName))
-                                    {
-                                        arch = targetOsName + "_" + arch;
-                                    }
-
-                                    var monoRoot = !string.IsNullOrEmpty(inPlayerDir) ? Path.Combine(playerDir, inPlayerDir) : playerDir;
-                                    foreach (var mono in Directory.EnumerateDirectories(monoRoot))
-                                    {
-                                        var monoName = Path.GetFileName(mono);
-
-                                        // If there's a dir that's not named "etc", rename that to "runtime"
-                                        foreach (var subdir in Directory.EnumerateDirectories(mono))
-                                        {
-                                            if (Path.GetFileName(subdir) != "etc")
-                                            {
-                                                Directory.Move(subdir, Path.Combine(mono, "runtime"));
-                                                break;
-                                            }
-                                        }
-
-                                        // then we can create the zip file
-                                        ZipFile.CreateFromDirectory(mono, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
-                                    }
+                                    arch = targetOsName + "_" + arch;
                                 }
-                            }
-                            else
-                            {
-                                // MacOS has a more annoying layout. The config is entirely separate from the runtime. 
-                                await build.ExtractAsync(packagePath, thisPkgDir, [prefix + extractPath, "./Mono*/**"], cancellationToken, flat: false);
 
-                                // our outer loop is for the config
-                                foreach (var monoConfigDir in Directory.EnumerateDirectories(thisPkgDir, "Mono*"))
+                                if (Directory.Exists(runtimeDir))
                                 {
-                                    var monoName = Path.GetFileName(monoConfigDir);
-                                    var runtimeDir = Path.Combine(monoConfigDir, "runtime");
-
-                                    foreach (var playerDir in Directory.EnumerateDirectories(variationsDir))
-                                    {
-                                        var arch = Path.GetFileName(playerDir).Replace("_player_nondevelopment_mono", "");
-                                        if (!arch.Contains(targetOsName))
-                                        {
-                                            arch = targetOsName + "_" + arch;
-                                        }
-
-                                        if (Directory.Exists(runtimeDir))
-                                        {
-                                            Directory.Delete(runtimeDir, true);
-                                        }
-
-                                        Directory.Move(Path.Combine(playerDir, "UnityPlayer.app", "Contents", "Frameworks"), runtimeDir);
-                                        ZipFile.CreateFromDirectory(monoConfigDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
-                                    }
+                                    Directory.Delete(runtimeDir, true);
                                 }
-                            }
 
-                            break;
+                                Directory.Move(Path.Combine(playerDir, "UnityPlayer.app", "Contents", "Frameworks"), runtimeDir);
+                                ZipFile.CreateFromDirectory(monoConfigDir, Path.Combine(monoBaseDir, $"{arch}_{monoName}.zip"));
+                            }
                         }
-
-                        default:
-                            throw new NotImplementedException();
                     }
                 }
             }
@@ -305,6 +245,30 @@ namespace UnityDataMiner.Jobs
             }
 
             Log.Information("[{Version}] Mono binaries packaged in {Time}", build.Version, stopwatch.Elapsed);
+
+            static string? GetVariationsDir(UnityBuild build, string thisPkgDir)
+            {
+                string? variationsDir = null;
+                foreach (var candidate in Directory.EnumerateDirectories(thisPkgDir, "Variations", SearchOption.AllDirectories))
+                {
+                    if (Path.GetFileName(candidate) is "Variations")
+                    {
+                        variationsDir = candidate;
+                        break;
+                    }
+                }
+
+                if (variationsDir is null)
+                {
+                    Log.Error("[{Version}] Could not find variations dir in selectively extracted package", build.Version);
+                }
+                else
+                {
+                    Log.Debug("[{Version}] Found variations dir {Dir}", build.Version, variationsDir);
+                }
+
+                return variationsDir;
+            }
         }
     }
 }
