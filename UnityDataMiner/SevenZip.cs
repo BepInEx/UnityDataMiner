@@ -54,11 +54,13 @@ public class SevenZip
         }
         else
         {
+#if DEBUG && false
             string? line;
             while ((line = process.StandardOutput.ReadLine()) is not null)
             {
                 Log.Debug("7z stdout: {OutputLine}", line);
             }
+#endif
         }
     }
 }

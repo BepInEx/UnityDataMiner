@@ -1,6 +1,5 @@
 ﻿using Serilog;
 using System;
-using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.IO.Compression;
@@ -99,6 +98,10 @@ namespace UnityDataMiner.Jobs
                     Log.Information("[{Version}] Processing {TargetOS}", build.Version, monoTargetOs);
 
                     var thisPkgDir = Path.Combine(monoBaseDir, monoTargetOs.ToString());
+                    if (Directory.Exists(thisPkgDir))
+                    {
+                        Directory.Delete(thisPkgDir, true);
+                    }
                     Directory.CreateDirectory(thisPkgDir);
 
                     var playerdirSuffix = (build.Version.Major, monoTargetOs) switch
@@ -151,11 +154,6 @@ namespace UnityDataMiner.Jobs
                             // search subdirs so we can find multiple Mono builds
                             foreach (var mono in Directory.EnumerateDirectories(playerDir, "Mono*", SearchOption.AllDirectories))
                             {
-                                if (!Directory.Exists(Path.Combine(mono, "etc")))
-                                {
-                                    // if we couldn't find an etc folder, skip it; it's not an actual Mono dir
-                                }
-
                                 var monoName = Path.GetFileName(mono);
                                 var targetRuntimeDir = Path.Combine(mono, "runtime");
 
