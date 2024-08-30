@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using NuGet.Packaging;
+using Serilog;
 
 namespace UnityDataMiner;
 
@@ -43,13 +44,23 @@ public class SevenZip
             processStartInfo.ArgumentList.AddRange(fileFilter);
         }
 
-        var process = Process.Start(processStartInfo) ?? throw new SevenZipException("Couldn't start 7z process");
+        using var process = Process.Start(processStartInfo) ?? throw new SevenZipException("Couldn't start 7z process");
 
         await process.WaitForExitAsync(cancellationToken);
 
         if (process.ExitCode != 0)
         {
             throw new SevenZipException("7z returned " + process.ExitCode + "\n" + (await process.StandardError.ReadToEndAsync()).Trim());
+        }
+        else
+        {
+#if DEBUG && false
+            string? line;
+            while ((line = process.StandardOutput.ReadLine()) is not null)
+            {
+                Log.Debug("7z stdout: {OutputLine}", line);
+            }
+#endif
         }
     }
 }

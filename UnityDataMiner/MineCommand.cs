@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.CommandLine;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
@@ -12,6 +13,7 @@ using AssetRipper.Primitives;
 using LibGit2Sharp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using UnityDataMiner.Jobs;
 
 namespace UnityDataMiner;
 
@@ -22,9 +24,9 @@ public partial class MineCommand : RootCommand
 
     public MineCommand()
     {
-        Add(new Argument<string?>("version")
+        Add(new Argument<string[]?>("versions")
         {
-            Arity = ArgumentArity.ZeroOrOne,
+            Arity = ArgumentArity.ZeroOrMore,
         });
         Add(new Option<DirectoryInfo>("--repository", () => new DirectoryInfo(Directory.GetCurrentDirectory())));
     }
@@ -35,7 +37,7 @@ public partial class MineCommand : RootCommand
         private readonly MinerOptions _minerOptions;
         private readonly IHttpClientFactory _clientFactory;
 
-        public string? Version { get; init; }
+        public string[]? Versions { get; init; }
         public DirectoryInfo Repository { get; init; }
 
         public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions, IHttpClientFactory clientFactory)
@@ -55,6 +57,7 @@ public partial class MineCommand : RootCommand
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "libraries"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "packages"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "corlibs"));
+            Directory.CreateDirectory(Path.Combine(Repository.FullName, "mono"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "libil2cpp-source"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "android"));
             Directory.CreateDirectory(Path.Combine(Repository.FullName, "versions"));
@@ -76,9 +79,17 @@ public partial class MineCommand : RootCommand
                 }
             });
 
-            var toRun = string.IsNullOrEmpty(Version)
-                ? unityVersions.Where(unityVersion => unityVersion.IsRunNeeded).ToArray()
-                : new[] { unityVersions.Single(x => x.ShortVersion == Version) };
+            var toRun = Versions is null or []
+                ? unityVersions.ToArray()
+                : unityVersions.Where(v => Versions.Contains(v.ShortVersion)).ToArray();
+
+            var jobs = ImmutableArray.Create<MinerJob>([
+                new AndroidMinerJob(),
+                new CorlibMinerJob(),
+                new LibIl2CppSourceMinerJob(),
+                new MonoMinerJob(),
+                new UnityLibsMinerJob(),
+            ]);
 
             _logger.LogInformation("Mining {Count} unity versions", toRun.Length);
 
@@ -86,7 +97,8 @@ public partial class MineCommand : RootCommand
             {
                 try
                 {
-                    await unityVersion.MineAsync(cancellationToken);
+                    //await unityVersion.MineAsync(cancellationToken);
+                    await unityVersion.ExecuteJobsAsync(jobs, cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

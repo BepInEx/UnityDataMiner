@@ -7,3 +7,5 @@ config.toml
 data/
 .idea
 *.user
+.vs/
+launchSettings.json
