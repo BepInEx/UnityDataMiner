@@ -27,6 +27,7 @@ public partial class MineCommand : RootCommand
             Arity = ArgumentArity.ZeroOrOne,
         });
         Add(new Option<DirectoryInfo>("--repository", () => new DirectoryInfo(Directory.GetCurrentDirectory())));
+        Add(new Option<int>("--jobs", () => 2));
     }
 
     public new class Handler : ICommandHandler
@@ -36,7 +37,8 @@ public partial class MineCommand : RootCommand
         private readonly IHttpClientFactory _clientFactory;
 
         public string? Version { get; init; }
-        public DirectoryInfo Repository { get; init; }
+        public required DirectoryInfo Repository { get; init; }
+        public required int Jobs { get; init; }
 
         public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions, IHttpClientFactory clientFactory)
         {
@@ -82,7 +84,7 @@ public partial class MineCommand : RootCommand
 
             _logger.LogInformation("Mining {Count} unity versions", toRun.Length);
 
-            await Parallel.ForEachAsync(toRun, token, async (unityVersion, cancellationToken) =>
+            await Parallel.ForEachAsync(toRun, new ParallelOptions { MaxDegreeOfParallelism = Jobs, CancellationToken = token }, async (unityVersion, cancellationToken) =>
             {
                 try
                 {
