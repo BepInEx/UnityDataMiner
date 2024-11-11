@@ -11,7 +11,7 @@ public class SevenZip
 {
     public static async Task EnsureInstalled(CancellationToken cancellationToken = default)
     {
-        var process = Process.Start(new ProcessStartInfo("7z", "--help")
+        var process = Process.Start(new ProcessStartInfo("7zz", "--help")
         {
             RedirectStandardOutput = true,
         }) ?? throw new SevenZipException("Couldn't start 7z process");
@@ -25,11 +25,12 @@ public class SevenZip
 
     public static async Task ExtractAsync(string archivePath, string outputDirectory, IEnumerable<string>? fileFilter = null, bool flat = true, CancellationToken cancellationToken = default)
     {
-        var processStartInfo = new ProcessStartInfo("7z")
+        var processStartInfo = new ProcessStartInfo("7zz")
         {
             ArgumentList =
             {
                 flat ? "e" : "x",
+                "-ssc-", // case-insensitive mode
                 "-y",
                 archivePath,
                 $"-o{outputDirectory}",

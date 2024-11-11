@@ -519,11 +519,21 @@ namespace UnityDataMiner
             {
                 case ".pkg":
                 {
-                    const string payloadName = "Payload~";
-                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, new[] { payloadName }, true,
-                        cancellationToken);
-                    await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, payloadName), destinationDirectory,
-                        filter, flat, cancellationToken);
+                    await SevenZip.ExtractAsync(archivePath, archiveDirectory, ["Payload~", "*/Payload"], true, cancellationToken);
+
+                    if (File.Exists(Path.Combine(archiveDirectory, "Payload")))
+                    {
+                        await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, "Payload"), archiveDirectory, ["Payload~"], true, cancellationToken);
+                        File.Delete(Path.Combine(archiveDirectory, "Payload"));
+                    }
+
+                    if (!File.Exists(Path.Combine(archiveDirectory, "Payload~")))
+                    {
+                        throw new Exception("Couldn't find Payload~ in the .pkg");
+                    }
+
+                    await SevenZip.ExtractAsync(Path.Combine(archiveDirectory, "Payload~"), destinationDirectory, filter, flat, cancellationToken);
+                    File.Delete(Path.Combine(archiveDirectory, "Payload~"));
 
                     break;
                 }
