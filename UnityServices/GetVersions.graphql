@@ -1,0 +1,19 @@
+query GetVersions(
+    $limit: Int!,
+    $skip: Int!,
+) {
+    getUnityReleases(
+        limit: $limit,
+        skip: $skip,
+    ) {
+        pageInfo {
+            hasNextPage
+        }
+        edges {
+            node {
+                version
+                shortRevision
+            }
+        }
+    }
+}

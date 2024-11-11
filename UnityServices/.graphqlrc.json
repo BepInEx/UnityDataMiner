@@ -1,0 +1,13 @@
+{
+  "schema": "schema.graphql",
+  "documents": "**/*.graphql",
+  "extensions": {
+    "endpoints": {
+      "unity": "https://services.unity.com/graphql"
+    },
+    "strawberryShake": {
+      "name": "UnityServicesClient",
+      "url": "https://services.unity.com/graphql"
+    }
+  }
+}

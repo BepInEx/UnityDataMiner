@@ -45,7 +45,7 @@ namespace UnityDataMiner
 
         public bool IsRunNeeded => !File.Exists(ZipFilePath) || !File.Exists(NuGetPackagePath) ||
                                    !File.Exists(CorlibZipPath) ||
-                                   (HasLibIl2Cpp && !File.Exists(LibIl2CppSourceZipPath)) ||
+                                   !File.Exists(LibIl2CppSourceZipPath) ||
                                    !Version.IsMonolithic() && !Directory.Exists(AndroidPath);
 
         public string BaseDownloadUrl => Version.GetDownloadUrl() + (Id == null ? string.Empty : $"{Id}/");
@@ -105,7 +105,6 @@ namespace UnityDataMiner
 
         // First modular version where own native player is included in the default installer
         private static readonly UnityVersion _firstMergedModularVersion = new(5, 4);
-        private static readonly UnityVersion _firstLibIl2CppVersion = new(5, 0, 2);
 
         // TODO: Might need to define more DLLs? This should be enough for basic unhollowing.
         private static readonly string[] _importantCorlibs =
@@ -130,7 +129,6 @@ namespace UnityDataMiner
         private bool HasLinuxEditor => LinuxInfo is not null;
         private bool HasModularPlayer => Version >= _firstMergedModularVersion;
         private bool IsMonolithic => Version.IsMonolithic();
-        private bool HasLibIl2Cpp => Version >= _firstLibIl2CppVersion;
 
         public bool NeedsInfoFetch { get; private set; }
 
@@ -199,7 +197,12 @@ namespace UnityDataMiner
 
             WindowsInfo = await FetchVariation("win");
             MacOsInfo = await FetchVariation("osx");
-            LinuxInfo = await FetchVariation("linux");
+
+            if (Version >= _firstLinuxVersion)
+            {
+                LinuxInfo = await FetchVariation("linux");
+            }
+
             NeedsInfoFetch = false;
         }
 
@@ -325,7 +328,7 @@ namespace UnityDataMiner
 
                     IEnumerable<string> directories = Directory.GetDirectories(Path.Combine(archiveDirectory, libs));
 
-                    var hasSymbols = Version > new UnityVersion(5, 3, 5, UnityVersionType.Final, 1);
+                    var hasSymbols = Version >= new UnityVersion(5, 4, 0, UnityVersionType.Beta, 19);
 
                     if (hasSymbols)
                     {
@@ -363,7 +366,7 @@ namespace UnityDataMiner
                     Log.Information("[{Version}] Extracted android binaries in {Time}", Version, stopwatch.Elapsed);
                 }
 
-                if (!File.Exists(ZipFilePath))
+                if (!File.Exists(LibIl2CppSourceZipPath))
                 {
                     Log.Information("[{Version}] Extracting libil2cpp source code", Version);
                     using (var stopwatch = new AutoStopwatch())
@@ -373,6 +376,7 @@ namespace UnityDataMiner
                         {
                             true => "Editor/Data/il2cpp/libil2cpp",
                             false when HasModularPlayer => "./Unity/Unity.app/Contents/il2cpp/libil2cpp",
+                            false when Version.LessThan(5, 0, 2) => "Editor/Data/PlaybackEngines/iossupport/il2cpp/libil2cpp/include",
                             false => "Editor/Data/il2cpp/libil2cpp",
                         };
                         await ExtractAsync(libil2cppSourceArchivePath, libil2cppSourceDirectory,
@@ -412,7 +416,7 @@ namespace UnityDataMiner
                         (false, true) => throw new Exception(
                             "Release can't be both legacy and modular at the same time"),
                         (false, false) when HasLinuxEditor =>
-                            $"Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64{(Version >= new UnityVersion(2021, 2) ? "_player" : "_withgfx")}_nondevelopment_mono/Data/Managed",
+                            $"Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64{(Version >= new UnityVersion(2021, 2, 0, UnityVersionType.Alpha, 8) ? "_player" : "_withgfx")}_nondevelopment_mono/Data/Managed",
                         (false, false) when !HasLinuxEditor && HasModularPlayer =>
                             $"./Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_nondevelopment_mono/Data/Managed",
                         (false, false) => "./Variations/win64_nondevelopment_mono/Data/Managed",

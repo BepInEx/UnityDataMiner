@@ -37,12 +37,14 @@ namespace UnityDataMiner
                             .ConfigureAppConfiguration(configuration => configuration.AddTomlFile("config.toml", true))
                             .ConfigureServices(services =>
                             {
-                                services.AddOptions<MinerOptions>().BindConfiguration("MinerOptions");
+                                services
+                                    .AddUnityServicesClient()
+                                    .ConfigureHttpClient(
+                                        client => client.BaseAddress = new Uri("https://services.unity.com/graphql"),
+                                        clientBuilder => clientBuilder.AddTransientHttpErrorPolicy(policy => policy.WaitAndRetryAsync(5, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))))
+                                    );
 
-                                services.AddHttpClient("unity", client =>
-                                {
-                                    client.BaseAddress = new Uri("https://unity.com/");
-                                }).AddTransientHttpErrorPolicy(policy => policy.WaitAndRetryAsync(5, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+                                services.AddOptions<MinerOptions>().BindConfiguration("MinerOptions");
                             })
                             .UseCommandHandler<MineCommand, MineCommand.Handler>()
                             .UseSerilog((context, services, loggerConfiguration) => loggerConfiguration

@@ -5,21 +5,18 @@ using System.CommandLine.Invocation;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AssetRipper.Primitives;
 using LibGit2Sharp;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using StrawberryShake;
+using UnityServices;
 
 namespace UnityDataMiner;
 
-public partial class MineCommand : RootCommand
+public class MineCommand : RootCommand
 {
-    [GeneratedRegex(@"unityhub:\/\/(?<version>[\d.\w]+)\/(?<id>[0-9a-f]+)")]
-    private static partial Regex UnityHubLinkRegex();
-
     public MineCommand()
     {
         Add(new Argument<string?>("version")
@@ -34,17 +31,17 @@ public partial class MineCommand : RootCommand
     {
         private readonly ILogger<Handler> _logger;
         private readonly MinerOptions _minerOptions;
-        private readonly IHttpClientFactory _clientFactory;
+        private readonly IUnityServicesClient _unityServicesClient;
 
         public string? Version { get; init; }
         public required DirectoryInfo Repository { get; init; }
         public required int Jobs { get; init; }
 
-        public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions, IHttpClientFactory clientFactory)
+        public Handler(ILogger<Handler> logger, IOptions<MinerOptions> minerOptions, IUnityServicesClient unityServicesClient)
         {
             _logger = logger;
             _minerOptions = minerOptions.Value;
-            _clientFactory = clientFactory;
+            _unityServicesClient = unityServicesClient;
         }
 
         public async Task<int> InvokeAsync(InvocationContext context)
@@ -78,9 +75,15 @@ public partial class MineCommand : RootCommand
                 }
             });
 
+            var invalidVersions = unityVersions.RemoveAll(x => x.WindowsInfo == null && x.MacOsInfo == null && x.LinuxInfo == null);
+            if (invalidVersions > 0)
+            {
+                _logger.LogWarning("Ignoring {Count} versions that have no downloads", invalidVersions);
+            }
+
             var toRun = string.IsNullOrEmpty(Version)
                 ? unityVersions.Where(unityVersion => unityVersion.IsRunNeeded).ToArray()
-                : new[] { unityVersions.Single(x => x.ShortVersion == Version) };
+                : new[] { unityVersions.Single(x => x.ShortVersion == Version || x.Version.ToString() == Version) };
 
             _logger.LogInformation("Mining {Count} unity versions", toRun.Length);
 
@@ -122,33 +125,40 @@ public partial class MineCommand : RootCommand
         private async Task<List<UnityBuild>> FetchUnityVersionsAsync(string repositoryPath)
         {
             var unityVersions = new Dictionary<UnityVersion, UnityBuild>();
-            await FetchUnityVersionsAsync(repositoryPath, unityVersions, "releases/editor/archive");
-            await FetchUnityVersionsAsync(repositoryPath, unityVersions, "releases/editor/releases.xml");
-            await FetchUnityVersionsAsync(repositoryPath, unityVersions, "releases/editor/beta/latest.xml");
-            await FetchUnityVersionsAsync(repositoryPath, unityVersions, "releases/editor/lts-releases.xml");
+            await FetchUnityVersionsAsync(repositoryPath, unityVersions);
             await FillMissingUnityVersionsAsync(repositoryPath, unityVersions);
             return unityVersions.Values.ToList();
         }
 
-        private async Task FetchUnityVersionsAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions, string path)
+        private async Task FetchUnityVersionsAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions)
         {
-            var httpClient = _clientFactory.CreateClient("unity");
-            var text = await httpClient.GetStringAsync(path);
-
             var count = 0;
 
-            foreach (Match match in UnityHubLinkRegex().Matches(text))
+            // We can't get all the versions at once because the unity backend explodes...
+            const int limit = 500;
+            var i = 0;
+            bool hasNextPage;
+
+            do
             {
-                var unityVersion = UnityVersion.Parse(match.Groups["version"].Value);
+                var result = await _unityServicesClient.GetVersions.ExecuteAsync(limit, limit * i++);
+                result.EnsureNoErrors();
 
-                if (!unityVersions.ContainsKey(unityVersion))
+                var data = result.Data!.GetUnityReleases;
+
+                hasNextPage = data.PageInfo.HasNextPage;
+
+                var edges = data.Edges;
+                count += edges.Count;
+
+                foreach (var edge in edges)
                 {
-                    unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, match.Groups["id"].Value, unityVersion));
-                    count++;
+                    var unityVersion = UnityVersion.Parse(edge.Node.Version);
+                    unityVersions.Add(unityVersion, new UnityBuild(repositoryPath, edge.Node.ShortRevision, unityVersion));
                 }
-            }
+            } while (hasNextPage);
 
-            _logger.LogInformation("Found {Count} new unity versions in {Path}", count, path);
+            _logger.LogInformation("Found {Count} unity versions", count);
         }
 
         private async Task FillMissingUnityVersionsAsync(string repositoryPath, Dictionary<UnityVersion, UnityBuild> unityVersions)
