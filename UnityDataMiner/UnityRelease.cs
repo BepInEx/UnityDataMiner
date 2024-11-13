@@ -104,7 +104,7 @@ namespace UnityDataMiner
         private static readonly UnityVersion _firstLinuxVersion = new(2018, 1, 5);
 
         // First modular version where own native player is included in the default installer
-        private static readonly UnityVersion _firstMergedModularVersion = new(5, 4);
+        private static readonly UnityVersion _firstMergedModularVersion = new(5, 4, 0, UnityVersionType.Beta, 8);
 
         // TODO: Might need to define more DLLs? This should be enough for basic unhollowing.
         private static readonly string[] _importantCorlibs =
@@ -206,7 +206,7 @@ namespace UnityDataMiner
             NeedsInfoFetch = false;
         }
 
-        private string GetDownloadFile()
+        private string GetUnityEditorDownloadPath()
         {
             var isLegacyDownload = Id == null || Version.Major < 5;
             var editorDownloadPrefix = isLegacyDownload ? "UnitySetup-" : "UnitySetup64-";
@@ -233,17 +233,17 @@ namespace UnityDataMiner
         {
             var isLegacyDownload = Id == null || Version.Major < 5;
 
-            var downloadFile = GetDownloadFile();
-            var monoDownloadFile = GetDownloadFile();
+            var unityEditorDownloadPath = GetUnityEditorDownloadPath();
 
-            var monoDownloadUrl = BaseDownloadUrl + downloadFile;
-            var corlibDownloadUrl = "";
+            var monoDownloadUrl = BaseDownloadUrl + unityEditorDownloadPath;
+            string? corlibDownloadUrl = null;
+
             // For specific versions, the installer has no players at all
             // So for corlib, download both the installer and the support module
-            if (!IsMonolithic && !HasModularPlayer)
+            if (!HasModularPlayer)
             {
                 corlibDownloadUrl = monoDownloadUrl;
-                monoDownloadUrl = BaseDownloadUrl + monoDownloadFile;
+                monoDownloadUrl = BaseDownloadUrl + WindowsInfo?.WindowsMono?.Url ?? throw new InvalidOperationException();
             }
 
             var androidDownloadUrl =
@@ -261,13 +261,13 @@ namespace UnityDataMiner
             var androidDirectory = Path.Combine(tmpDirectory, "android");
 
             var monoArchivePath = Path.Combine(tmpDirectory, Path.GetFileName(monoDownloadUrl));
-            var corlibArchivePath = !IsMonolithic && !HasModularPlayer
-                ? Path.Combine(tmpDirectory, Path.GetFileName(corlibDownloadUrl))
-                : monoArchivePath;
+            var corlibArchivePath = HasModularPlayer
+                ? monoArchivePath
+                : Path.Combine(tmpDirectory, Path.GetFileName(corlibDownloadUrl)!);
             var androidArchivePath = androidDownloadUrl == null
                 ? null
                 : Path.Combine(tmpDirectory, Path.GetFileName(androidDownloadUrl));
-            var libil2cppSourceArchivePath = Path.Combine(tmpDirectory, Path.GetFileName(downloadFile));
+            var libil2cppSourceArchivePath = Path.Combine(tmpDirectory, Path.GetFileName(unityEditorDownloadPath));
 
             try
             {
@@ -280,7 +280,7 @@ namespace UnityDataMiner
                         {
                             await DownloadAsync(monoDownloadUrl, monoArchivePath, cancellationToken);
 
-                            if (corlibDownloadUrl is not "")
+                            if (corlibDownloadUrl != null)
                             {
                                 await DownloadAsync(corlibDownloadUrl, corlibArchivePath, cancellationToken);
                             }
@@ -419,7 +419,7 @@ namespace UnityDataMiner
                             $"Editor/Data/PlaybackEngines/LinuxStandaloneSupport/Variations/linux64{(Version >= new UnityVersion(2021, 2, 0, UnityVersionType.Alpha, 8) ? "_player" : "_withgfx")}_nondevelopment_mono/Data/Managed",
                         (false, false) when !HasLinuxEditor && HasModularPlayer =>
                             $"./Unity/Unity.app/Contents/PlaybackEngines/MacStandaloneSupport/Variations/macosx64_nondevelopment_mono/Data/Managed",
-                        (false, false) => "./Variations/win64_nondevelopment_mono/Data/Managed",
+                        (false, false) => "*/Variations/win64_nondevelopment_mono/Data/Managed",
                     };
 
                     await ExtractAsync(monoArchivePath, managedDirectory, new[] { $"{monoPath}/*.dll" },
